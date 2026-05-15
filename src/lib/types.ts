@@ -12,6 +12,12 @@ export interface Profile {
   gst_number: string | null;
   gst_rate: number;
   wcb_account_number: string;
+  wcb_industry_code: string | null;
+  wcb_industry_rate: number | null;
+  wcb_coverage_effective_date: string | null;
+  wcb_coverage_expiry_date: string | null;
+  wcb_insurable_earnings: number | null;
+  wcb_annual_premium: number | null;
   default_hourly_rate: number | null;
   default_tax_reserve_percent: number;
   home_office_percent: number;
@@ -148,26 +154,66 @@ export interface Expense {
   job_sites?: JobSite;
 }
 
-export type WcbStatus = 'waiting_for_invoice' | 'invoice_received' | 'partially_paid' | 'paid' | 'overdue' | 'pending';
-
-export interface WcbPayment {
+export interface WcbPremium {
   id: string;
   user_id: string;
-  description: string | null;
-  expected_invoice_date: string | null;
-  invoice_received: boolean;
-  invoice_date: string | null;
-  due_date: string | null;
-  amount_expected: number;
-  amount_paid: number;
-  remaining_balance: number;
-  payment_date: string | null;
-  status: WcbStatus;
-  document_url: string | null;
+  year: number;
+  total_premium_amount: number;
+  insurable_earnings_declared: number | null;
+  industry_code: string | null;
+  industry_rate: number | null;
+  assessment_letter_date: string | null;
   notes: string | null;
-  amount: number | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface WcbInstallment {
+  id: string;
+  user_id: string;
+  wcb_premium_id: string | null;
+  installment_number: number;
+  due_date: string | null;
+  amount_due: number;
+  amount_paid: number;
+  paid_date: string | null;
+  payment_method: string | null;
+  receipt_number: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type WcbClearanceDirection = 'issued_to_me' | 'i_issued';
+export type WcbClearanceStatus = 'cleared' | 'not_cleared' | 'pending';
+
+export interface WcbClearanceLetter {
+  id: string;
+  user_id: string;
+  direction: WcbClearanceDirection;
+  counterparty_name: string;
+  letter_date: string | null;
+  valid_through_date: string | null;
+  status: WcbClearanceStatus;
+  pdf_url: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export type WcbChargeType = 'penalty' | 'interest' | 'admin_fee' | 'other';
+
+export interface WcbCharge {
+  id: string;
+  user_id: string;
+  wcb_premium_id: string | null;
+  charge_type: WcbChargeType;
+  amount: number;
+  charge_date: string | null;
+  paid: boolean;
+  paid_date: string | null;
+  notes: string | null;
+  created_at: string;
 }
 
 export interface Document {
@@ -189,7 +235,8 @@ export const EXPENSE_CATEGORIES = [
   'Phone',
   'Internet',
   'Home office',
-  'WCB',
+  'WCB Premium',
+  'WCB Penalty/Interest',
   'Insurance',
   'Business license / admin',
   'Software / apps',

@@ -68,6 +68,8 @@ export function ExpensesPage() {
     else if (cat === 'Meals') bup = 50;
     else if (cat === 'Home office') bup = profile?.home_office_percent ?? 100;
     else if (cat === 'Vehicle / auto' || cat === 'Fuel') bup = profile?.vehicle_business_use_percent ?? 100;
+    else if (cat === 'WCB Premium') bup = 100;
+    else if (cat === 'WCB Penalty/Interest') bup = 0;
 
     setFormData(f => ({
       ...f,

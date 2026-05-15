@@ -46,11 +46,12 @@ export function TaxPage() {
     const yearStart = `${selectedYear}-01-01`;
     const yearEnd = `${selectedYear}-12-31`;
 
-    const [pRes, invRes, expRes, instRes] = await Promise.all([
+    const [pRes, invRes, expRes, instRes, wcbInstRes] = await Promise.all([
       supabase.from('profiles').select('*').eq('id', user!.id).maybeSingle(),
       supabase.from('invoices').select('subtotal, gst_amount').eq('user_id', user!.id).gte('invoice_date', yearStart).lte('invoice_date', yearEnd).not('status', 'eq', 'cancelled'),
       supabase.from('expenses').select('category, subtotal_before_gst, gst_paid, business_use_percent, home_office_related').eq('user_id', user!.id).gte('expense_date', yearStart).lte('expense_date', yearEnd),
       supabase.from('tax_installments').select('*').eq('user_id', user!.id).eq('year', selectedYear).order('quarter'),
+      supabase.from('wcb_installments').select('amount_paid, paid_date').eq('user_id', user!.id),
     ]);
 
     setProfile(pRes.data);
@@ -66,6 +67,7 @@ export function TaxPage() {
 
     expenses.forEach(exp => {
       const cat = exp.category || 'Other';
+      if (cat === 'WCB Penalty/Interest') return;
       const t2125Line = mapCategoryToT2125Line(cat);
       const bup = (exp.business_use_percent || 100) / 100;
       let deductible = (exp.subtotal_before_gst || 0) * bup;
@@ -76,6 +78,13 @@ export function TaxPage() {
       totalExpenses += deductible;
       gstPaid += (exp.gst_paid || 0) * bup;
     });
+
+    const wcbDeductiblePremiums = (wcbInstRes.data || []).reduce((s, i) => s + (i.amount_paid || 0), 0);
+    if (wcbDeductiblePremiums > 0) {
+      const insuranceLine = 'Insurance (line 8690)';
+      expensesByCategory[insuranceLine] = (expensesByCategory[insuranceLine] || 0) + wcbDeductiblePremiums;
+      totalExpenses += wcbDeductiblePremiums;
+    }
 
     setYearData({ revenue, gstCollected, gstPaid, expensesByCategory, totalExpenses });
     setInstalments(instRes.data || []);
@@ -404,6 +413,8 @@ export function TaxPage() {
       { title: '12. GST/HST Registration Threshold', content: `Mandatory once gross revenue exceeds $30,000 in any 4 consecutive quarters. You're currently at ${formatMoney(yearData.revenue)} this year.${!profile?.gst_enabled ? ' Even below that, voluntary registration lets you claim ITCs on business purchases.' : ''}` },
       { title: '13. Record Keeping (6 years)', content: `Keep all receipts, invoices, mileage logs, contracts for 6 years after the fiscal year. Digital copies are accepted if legible.` },
       { title: '14. Capital Cost Allowance (CCA)', content: `Big purchases (truck, equipment > $500) aren't fully deducted year one — they depreciate via CCA classes.\nClass 10 (vehicles) = 30%/year.\nClass 8 (tools, equipment) = 20%/year.` },
+      { title: '15. WCB Premiums (100% Deductible)', content: `Your WCB premium is fully deductible on T2125 line 8690 (Insurance).\nAt your marginal rate of ${(taxBreakdown.marginalRate * 100).toFixed(1)}%, your premium saves approximately ${formatMoney((profile?.wcb_annual_premium || 0) * taxBreakdown.marginalRate)} in tax.\nIMPORTANT: WCB penalties and interest are NOT deductible (ITA 67.6). Only the premium itself qualifies.` },
+      { title: '16. WCB Benefits (If Injured)', content: `WCB benefits received (if injured) are reported on T1 line 14400 with an offsetting deduction on line 25000 — effectively tax-free at the federal level but still affects some calculations like clawbacks.\nYour benefits would be capped at your declared insurable earnings (${profile?.wcb_insurable_earnings ? formatMoney(profile.wcb_insurable_earnings) : 'not set'}) or actual net income, whichever is lower.` },
     ];
   }
 

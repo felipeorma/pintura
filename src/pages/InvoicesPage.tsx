@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { StatusBadge } from '../components/StatusBadge';
 import type { Invoice, Client, WorkHour, Profile, InvoiceItem } from '../lib/types';
-import { Plus, X, FileText, Download, Trash2, Pencil, Eye, Send, History, CheckCircle } from 'lucide-react';
+import { Plus, X, FileText, Download, Trash2, Pencil, Eye, Send, History, CheckCircle, AlertTriangle } from 'lucide-react';
 import { format } from 'date-fns';
 import { generateInvoicePdf } from '../lib/invoicePdf';
 import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
@@ -64,16 +64,20 @@ export function InvoicesPage() {
   const [showHistory, setShowHistory] = useState(false);
   const [invoiceFlags, setInvoiceFlags] = useState<Record<string, { downloaded: boolean; sent: boolean }>>({});
 
+  // WCB clearance warning
+  const [clearanceWarnings, setClearanceWarnings] = useState<Record<string, boolean>>({});
+
   useEffect(() => {
     if (user) loadData();
   }, [user]);
 
   async function loadData() {
-    const [invRes, clientsRes, profileRes, historyRes] = await Promise.all([
+    const [invRes, clientsRes, profileRes, historyRes, lettersRes] = await Promise.all([
       supabase.from('invoices').select('*, clients(name)').eq('user_id', user!.id).order('invoice_date', { ascending: false }),
       supabase.from('clients').select('*').eq('user_id', user!.id).eq('active', true).order('name'),
       supabase.from('profiles').select('*').eq('id', user!.id).maybeSingle(),
       supabase.from('invoice_history').select('*').eq('user_id', user!.id).order('created_at', { ascending: false }),
+      supabase.from('wcb_clearance_letters').select('counterparty_name, valid_through_date, direction').eq('user_id', user!.id).eq('direction', 'i_issued').eq('status', 'cleared'),
     ]);
     setInvoices(invRes.data || []);
     setClients(clientsRes.data || []);
@@ -89,6 +93,20 @@ export function InvoicesPage() {
       if (h.action === 'sent') flags[h.invoice_id].sent = true;
     });
     setInvoiceFlags(flags);
+
+    // Build clearance warnings: check if each client has a recent letter (last 60 days)
+    const now = new Date();
+    const recentLetters = (lettersRes.data || []).filter(l =>
+      l.valid_through_date && new Date(l.valid_through_date) > now
+    );
+    const recentCounterparties = new Set(recentLetters.map(l => l.counterparty_name.toLowerCase()));
+    const warnings: Record<string, boolean> = {};
+    (clientsRes.data || []).forEach(c => {
+      if (!recentCounterparties.has(c.name.toLowerCase())) {
+        warnings[c.id] = true;
+      }
+    });
+    setClearanceWarnings(warnings);
 
     setLoading(false);
   }
@@ -706,6 +724,16 @@ export function InvoicesPage() {
 
               {previewInvoice.notes && (
                 <div className="text-xs text-gray-500 dark:text-gray-400 italic">{previewInvoice.notes}</div>
+              )}
+
+              {previewInvoice.status === 'draft' && previewInvoice.client_id && clearanceWarnings[previewInvoice.client_id] && (
+                <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3 flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
+                  <div>
+                    <p className="text-xs font-medium text-amber-800 dark:text-amber-200">No recent WCB clearance letter on file for {previewClient.name}.</p>
+                    <p className="text-xs text-amber-600 dark:text-amber-400 mt-0.5">Some contractors require this before payment. Get one from myWCB.</p>
+                  </div>
+                </div>
               )}
 
               <div className="flex gap-3 pt-2">

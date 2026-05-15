@@ -5,9 +5,9 @@ import { DashboardCard } from '../components/DashboardCard';
 import {
   Clock, DollarSign, FileText, Receipt,
   TrendingUp, Calculator, ShieldCheck, Wallet, Car, Home,
-  AlertTriangle, CreditCard
+  AlertTriangle, CreditCard, ExternalLink
 } from 'lucide-react';
-import { startOfWeek, endOfWeek, startOfMonth, endOfMonth, format } from 'date-fns';
+import { startOfWeek, endOfWeek, startOfMonth, endOfMonth, format, differenceInDays, parseISO } from 'date-fns';
 
 interface DashboardData {
   hoursThisWeek: number;
@@ -36,6 +36,12 @@ interface DashboardData {
   uninvoicedHoursCount: number;
   totalNet: number;
   profitBeforeTaxReserve: number;
+  // WCB card
+  wcbCoverageActive: boolean;
+  wcbCoverageExpiry: string | null;
+  wcbNextInstDue: string | null;
+  wcbNextInstAmount: number;
+  wcbDaysToExpiry: number | null;
 }
 
 export function DashboardPage() {
@@ -58,10 +64,11 @@ export function DashboardPage() {
 
     const [
       weekHours, monthHours, uninvoiced, unpaidInv,
-      monthInvoices, monthExpenses, yearWcbPaid, yearWcbAll,
+      monthInvoices, monthExpenses, yearWcbInstallments, yearWcbAll,
       yearGstCollected, yearGstItc, paymentsReceived,
-      profile, mileageMonth, mileageYear, vehicles, homeExpenses,
+      profileRes, mileageMonth, mileageYear, vehicles, homeExpenses,
       yearExpenses, yearInvoices, missingReceiptsRes, uninvoicedCount,
+      wcbNextInst,
     ] = await Promise.all([
       supabase.from('work_hours').select('total_hours').eq('user_id', user!.id).gte('work_date', weekStart).lte('work_date', weekEnd),
       supabase.from('work_hours').select('total_hours').eq('user_id', user!.id).gte('work_date', monthStart).lte('work_date', monthEnd),
@@ -69,12 +76,12 @@ export function DashboardPage() {
       supabase.from('invoices').select('balance_due').eq('user_id', user!.id).in('status', ['sent', 'overdue']),
       supabase.from('invoices').select('subtotal, gst_amount').eq('user_id', user!.id).gte('invoice_date', monthStart).lte('invoice_date', monthEnd).in('status', ['sent', 'paid']),
       supabase.from('expenses').select('deductible_amount, itc_claim_amount').eq('user_id', user!.id).gte('expense_date', monthStart).lte('expense_date', monthEnd),
-      supabase.from('wcb_payments').select('amount_paid').eq('user_id', user!.id).gte('created_at', yearStart).eq('status', 'paid'),
-      supabase.from('wcb_payments').select('remaining_balance, status').eq('user_id', user!.id),
+      supabase.from('wcb_installments').select('amount_paid').eq('user_id', user!.id),
+      supabase.from('wcb_installments').select('amount_due, amount_paid, due_date').eq('user_id', user!.id),
       supabase.from('invoices').select('gst_amount').eq('user_id', user!.id).gte('invoice_date', yearStart).in('status', ['sent', 'paid']),
       supabase.from('expenses').select('itc_claim_amount').eq('user_id', user!.id).gte('expense_date', yearStart),
       supabase.from('payments').select('amount').eq('user_id', user!.id).gte('payment_date', yearStart),
-      supabase.from('profiles').select('default_tax_reserve_percent').eq('id', user!.id).maybeSingle(),
+      supabase.from('profiles').select('default_tax_reserve_percent, wcb_coverage_expiry_date').eq('id', user!.id).maybeSingle(),
       supabase.from('mileage_logs').select('km_driven').eq('user_id', user!.id).gte('log_date', monthStart).lte('log_date', monthEnd),
       supabase.from('mileage_logs').select('km_driven').eq('user_id', user!.id).gte('log_date', yearStart),
       supabase.from('vehicles').select('business_use_percent').eq('user_id', user!.id).eq('active', true).limit(1),
@@ -83,6 +90,7 @@ export function DashboardPage() {
       supabase.from('invoices').select('subtotal').eq('user_id', user!.id).gte('invoice_date', yearStart).in('status', ['sent', 'paid']),
       supabase.from('expenses').select('id').eq('user_id', user!.id).is('receipt_url', null).gte('expense_date', yearStart),
       supabase.from('work_hours').select('id').eq('user_id', user!.id).eq('status', 'not_invoiced'),
+      supabase.from('wcb_installments').select('due_date, amount_due, amount_paid').eq('user_id', user!.id).order('due_date'),
     ]);
 
     const hoursThisWeek = (weekHours.data || []).reduce((s, r) => s + (r.total_hours || 0), 0);
@@ -92,18 +100,26 @@ export function DashboardPage() {
     const incomeThisMonth = (monthInvoices.data || []).reduce((s, r) => s + (r.subtotal || 0), 0);
     const gstCollectedThisMonth = (monthInvoices.data || []).reduce((s, r) => s + (r.gst_amount || 0), 0);
     const expensesThisMonth = (monthExpenses.data || []).reduce((s, r) => s + (r.deductible_amount || 0), 0);
-    const wcbPaidThisYear = (yearWcbPaid.data || []).reduce((s, r) => s + (r.amount_paid || 0), 0);
+    const wcbPaidThisYear = (yearWcbInstallments.data || []).reduce((s, r) => s + (r.amount_paid || 0), 0);
 
     const upcomingWcbBalance = (yearWcbAll.data || [])
-      .filter(r => r.status !== 'paid')
-      .reduce((s, r) => s + (r.remaining_balance || 0), 0);
+      .filter(r => r.amount_paid < r.amount_due)
+      .reduce((s, r) => s + (r.amount_due - r.amount_paid), 0);
 
     const totalGstCollected = (yearGstCollected.data || []).reduce((s, r) => s + (r.gst_amount || 0), 0);
     const totalGstItc = (yearGstItc.data || []).reduce((s, r) => s + (r.itc_claim_amount || 0), 0);
     const estimatedGstPayable = Math.max(0, totalGstCollected - totalGstItc);
 
     const totalPaymentsReceived = (paymentsReceived.data || []).reduce((s, r) => s + (r.amount || 0), 0);
-    const taxReservePercent = profile.data?.default_tax_reserve_percent || 25;
+    const taxReservePercent = profileRes.data?.default_tax_reserve_percent || 25;
+
+    // WCB coverage card data
+    const wcbExpiry = profileRes.data?.wcb_coverage_expiry_date || null;
+    const wcbCoverageActive = wcbExpiry ? new Date(wcbExpiry) > new Date() : false;
+    const wcbDaysToExpiry = wcbExpiry ? differenceInDays(parseISO(wcbExpiry), new Date()) : null;
+    const nextUnpaidInst = (wcbNextInst.data || []).find(i => i.amount_paid < i.amount_due);
+    const wcbNextInstDue = nextUnpaidInst?.due_date || null;
+    const wcbNextInstAmount = nextUnpaidInst ? nextUnpaidInst.amount_due - nextUnpaidInst.amount_paid : 0;
 
     const totalDeductibleExpenses = (yearExpenses.data || []).reduce((s, r) => s + (r.deductible_amount || 0), 0);
     const totalIncomeBeforeGst = (yearInvoices.data || []).reduce((s, r) => s + (r.subtotal || 0), 0);
@@ -149,6 +165,11 @@ export function DashboardPage() {
       uninvoicedHoursCount,
       totalNet,
       profitBeforeTaxReserve,
+      wcbCoverageActive,
+      wcbCoverageExpiry: wcbExpiry,
+      wcbNextInstDue,
+      wcbNextInstAmount,
+      wcbDaysToExpiry,
     });
     setLoading(false);
   }
@@ -192,6 +213,48 @@ export function DashboardPage() {
         <DashboardCard title="Business KM (Month)" value={`${data.businessKmMonth.toFixed(0)} km`} icon={<Car className="w-5 h-5" />} />
         <DashboardCard title="Business KM (Year)" value={`${data.businessKmYear.toFixed(0)} km`} icon={<Car className="w-5 h-5" />} subtitle={data.vehicleBusinessPercent ? `${data.vehicleBusinessPercent.toFixed(0)}% business use` : undefined} />
         <DashboardCard title="Home Office Deductible" value={fmt(data.homeOfficeDeductible)} icon={<Home className="w-5 h-5" />} subtitle="This year" />
+      </div>
+
+      {/* WCB Status Card */}
+      <div className="mt-6 bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-5">
+        <div className="flex items-center gap-3 mb-3">
+          <div className="p-2 bg-teal-50 dark:bg-teal-900/30 rounded-lg">
+            <ShieldCheck className="w-5 h-5 text-teal-600 dark:text-teal-400" />
+          </div>
+          <div className="flex-1">
+            <h2 className="text-sm font-semibold text-gray-900 dark:text-white">WCB Coverage</h2>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Alberta — Personal Optional</p>
+          </div>
+          <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
+            data.wcbCoverageActive
+              ? (data.wcbDaysToExpiry !== null && data.wcbDaysToExpiry < 30 ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300' : 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300')
+              : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
+          }`}>
+            {data.wcbCoverageActive
+              ? (data.wcbDaysToExpiry !== null && data.wcbDaysToExpiry < 30 ? `Expiring (${data.wcbDaysToExpiry}d)` : 'Active')
+              : 'Expired'}
+          </span>
+        </div>
+        <div className="grid grid-cols-3 gap-4 text-sm">
+          <div>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Next Payment</p>
+            <p className="font-medium text-gray-900 dark:text-white">
+              {data.wcbNextInstAmount > 0 ? fmt(data.wcbNextInstAmount) : 'Paid up'}
+            </p>
+            {data.wcbNextInstDue && (
+              <p className="text-xs text-gray-400">{format(parseISO(data.wcbNextInstDue), 'MMM d')}</p>
+            )}
+          </div>
+          <div>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Upcoming Balance</p>
+            <p className="font-medium text-amber-600 dark:text-amber-400">{fmt(data.upcomingWcbBalance)}</p>
+          </div>
+          <div className="text-right">
+            <a href="https://myaccount.wcb.ab.ca" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-teal-600 dark:text-teal-400 hover:underline font-medium">
+              <ExternalLink className="w-3 h-3" /> Get Clearance
+            </a>
+          </div>
+        </div>
       </div>
 
       {/* TOTAL NET Section */}

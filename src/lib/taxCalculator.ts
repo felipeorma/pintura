@@ -136,7 +136,9 @@ export const T2125_CATEGORIES: Record<string, string> = {
   'Home office': 'Business-use-of-home expenses',
   'Software / apps': 'Office expenses',
   'Business license / admin': 'Licences, memberships',
-  'WCB': 'Insurance',
+  'WCB': 'Insurance (line 8690)',
+  'WCB Premium': 'Insurance (line 8690)',
+  'WCB Penalty/Interest': 'Non-deductible (ITA 67.6)',
   'Other': 'Other expenses',
 };
 

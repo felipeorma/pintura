@@ -105,12 +105,18 @@ export const EXPENSE_CATEGORY_DATA: CategoryDef[] = [
     ],
   },
   {
-    name: 'WCB',
+    name: 'WCB Premium',
     subcategories: [
-      { name: 'WCB premium' },
-      { name: 'WCB installment' },
-      { name: 'WCB clearance document' },
-      { name: 'WCB account document' },
+      { name: 'Annual premium' },
+      { name: 'Installment payment' },
+    ],
+  },
+  {
+    name: 'WCB Penalty/Interest',
+    subcategories: [
+      { name: 'Late payment penalty', needsReview: true },
+      { name: 'Interest charge', needsReview: true },
+      { name: 'Admin fee', needsReview: true },
     ],
   },
   {

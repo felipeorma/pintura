@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { Profile } from '../lib/types';
-import { Save, Settings, DollarSign, Calculator, Home } from 'lucide-react';
+import { Save, Settings, DollarSign, Calculator, Home, ShieldCheck } from 'lucide-react';
 
-type Tab = 'business' | 'defaults' | 'tax' | 'home';
+type Tab = 'business' | 'defaults' | 'tax' | 'home' | 'wcb';
 
 export function SettingsPage() {
   const { user } = useAuth();
@@ -40,6 +40,12 @@ export function SettingsPage() {
       gst_number: profile.gst_number,
       gst_rate: profile.gst_rate,
       wcb_account_number: profile.wcb_account_number,
+      wcb_industry_code: profile.wcb_industry_code,
+      wcb_industry_rate: profile.wcb_industry_rate,
+      wcb_coverage_effective_date: profile.wcb_coverage_effective_date,
+      wcb_coverage_expiry_date: profile.wcb_coverage_expiry_date,
+      wcb_insurable_earnings: profile.wcb_insurable_earnings,
+      wcb_annual_premium: profile.wcb_annual_premium,
       default_hourly_rate: profile.default_hourly_rate,
       default_tax_reserve_percent: profile.default_tax_reserve_percent,
       home_office_percent: profile.home_office_percent,
@@ -65,6 +71,7 @@ export function SettingsPage() {
     { key: 'defaults', label: 'Defaults', icon: DollarSign },
     { key: 'tax', label: 'Tax Settings', icon: Calculator },
     { key: 'home', label: 'Home & Vehicle', icon: Home },
+    { key: 'wcb', label: 'WCB', icon: ShieldCheck },
   ];
 
   if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-2 border-teal-600 border-t-transparent rounded-full" /></div>;
@@ -129,14 +136,6 @@ export function SettingsPage() {
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Province</label>
                   <input type="text" value={profile.province || ''} onChange={e => update('province', e.target.value)} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
                 </div>
-              </div>
-            </section>
-
-            <section className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4 space-y-4">
-              <h2 className="text-sm font-semibold text-gray-900 dark:text-white">WCB</h2>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">WCB Account Number</label>
-                <input type="text" value={profile.wcb_account_number || ''} onChange={e => update('wcb_account_number', e.target.value)} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
               </div>
             </section>
 
@@ -207,6 +206,53 @@ export function SettingsPage() {
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Industry Code (NAICS)</label>
                 <input type="text" value={profile.industry_code || '238320'} onChange={e => update('industry_code', e.target.value)} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
                 <p className="text-xs text-gray-400 mt-1">Painting & wall covering (238320). Used on T2125.</p>
+              </div>
+            </section>
+          </>
+        )}
+
+        {activeTab === 'wcb' && (
+          <>
+            <section className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4 space-y-4">
+              <h2 className="text-sm font-semibold text-gray-900 dark:text-white">WCB Account</h2>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Account Number</label>
+                <input type="text" value={profile.wcb_account_number || ''} onChange={e => update('wcb_account_number', e.target.value)} placeholder="e.g. 11029825" className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Industry Classification</label>
+                <input type="text" value={profile.wcb_industry_code || ''} onChange={e => update('wcb_industry_code', e.target.value)} placeholder="e.g. Painting services" className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Industry Rate (per $100 of insurable earnings)</label>
+                <input type="number" value={profile.wcb_industry_rate ?? ''} onChange={e => update('wcb_industry_rate', parseFloat(e.target.value) || null)} min={0} step={0.01} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+              </div>
+            </section>
+
+            <section className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4 space-y-4">
+              <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Coverage Period</h2>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Effective Date</label>
+                  <input type="date" value={profile.wcb_coverage_effective_date || ''} onChange={e => update('wcb_coverage_effective_date', e.target.value || null)} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Expiry Date</label>
+                  <input type="date" value={profile.wcb_coverage_expiry_date || ''} onChange={e => update('wcb_coverage_expiry_date', e.target.value || null)} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+                </div>
+              </div>
+            </section>
+
+            <section className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4 space-y-4">
+              <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Premium & Earnings</h2>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Insurable Earnings (declared)</label>
+                <input type="number" value={profile.wcb_insurable_earnings ?? ''} onChange={e => update('wcb_insurable_earnings', parseFloat(e.target.value) || null)} min={0} step={100} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+                <p className="text-xs text-gray-400 mt-1">Must be less than or equal to actual net business income. WCB caps benefits at the lower.</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Annual Premium ($)</label>
+                <input type="number" value={profile.wcb_annual_premium ?? ''} onChange={e => update('wcb_annual_premium', parseFloat(e.target.value) || null)} min={0} step={0.01} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
               </div>
             </section>
           </>
