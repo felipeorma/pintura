@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { StatusBadge } from '../components/StatusBadge';
 import type { WorkHour, Client, JobSite, Profile } from '../lib/types';
-import { Plus, X, Clock, Pencil, Trash2, ShieldCheck, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Plus, X, Clock, Pencil, Trash2, ShieldCheck, AlertCircle, CheckCircle2, Check } from 'lucide-react';
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from 'date-fns';
 
 export function WorkHoursPage() {
@@ -202,6 +202,32 @@ export function WorkHoursPage() {
       return;
     }
     setShowValidate(false);
+    loadData();
+  }
+
+  async function approveEntry(entry: WorkHour, e: React.MouseEvent) {
+    e.stopPropagation();
+    // Validate the same fields as the bulk validator
+    const errors: string[] = [];
+    if (!entry.client_id) errors.push('Missing client');
+    if (!entry.job_site_id) errors.push('Missing job site');
+    if (!entry.total_hours || entry.total_hours <= 0) errors.push('Hours must be greater than 0');
+    if (!entry.hourly_rate || entry.hourly_rate <= 0) errors.push('Hourly rate must be greater than 0');
+    if (!entry.work_date) errors.push('Missing date');
+
+    if (errors.length > 0) {
+      alert('Cannot approve this entry:\n\n• ' + errors.join('\n• ') + '\n\nEdit the entry to fix these issues.');
+      return;
+    }
+
+    const { error } = await supabase
+      .from('work_hours')
+      .update({ status: 'not_invoiced' })
+      .eq('id', entry.id);
+    if (error) {
+      alert('Error approving entry: ' + error.message);
+      return;
+    }
     loadData();
   }
 
@@ -538,6 +564,15 @@ export function WorkHoursPage() {
                   <p className="text-xs text-gray-500 dark:text-gray-400">${entry.subtotal?.toFixed(2)}</p>
                 </div>
                 <div className="flex items-center gap-1 ml-2">
+                  {entry.status === 'pending' && (
+                    <button
+                      onClick={(e) => approveEntry(entry, e)}
+                      className="p-1.5 text-emerald-500 hover:text-white hover:bg-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 rounded-md transition-colors"
+                      title="Approve this entry"
+                    >
+                      <Check className="w-4 h-4" />
+                    </button>
+                  )}
                   <button
                     onClick={(e) => handleEditClick(entry, e)}
                     className="p-1.5 text-gray-400 hover:text-teal-600 hover:bg-teal-50 dark:hover:bg-teal-900/20 rounded-md transition-colors"
