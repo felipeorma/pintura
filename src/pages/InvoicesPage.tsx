@@ -3,8 +3,9 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { StatusBadge } from '../components/StatusBadge';
 import type { Invoice, Client, WorkHour, Profile } from '../lib/types';
-import { Plus, X, FileText } from 'lucide-react';
+import { Plus, X, FileText, Download } from 'lucide-react';
 import { format } from 'date-fns';
+import { generateInvoicePdf } from '../lib/invoicePdf';
 
 type InvoiceMode = 'hours' | 'service';
 
@@ -191,6 +192,15 @@ export function InvoicesPage() {
   function removeServiceItem(index: number) {
     if (serviceItems.length <= 1) return;
     setServiceItems(serviceItems.filter((_, i) => i !== index));
+  }
+
+  async function downloadPdf(inv: Invoice) {
+    const [itemsRes, clientRes] = await Promise.all([
+      supabase.from('invoice_items').select('*').eq('invoice_id', inv.id),
+      supabase.from('clients').select('*').eq('id', inv.client_id!).maybeSingle(),
+    ]);
+    if (!profile || !clientRes.data) return;
+    generateInvoicePdf(inv, itemsRes.data || [], profile, clientRes.data);
   }
 
   const filtered = filterStatus === 'all' ? invoices : invoices.filter(i => i.status === filterStatus);
@@ -415,6 +425,9 @@ export function InvoicesPage() {
               </div>
             </div>
             <div className="mt-2 flex gap-2">
+              <button onClick={() => downloadPdf(inv)} className="text-xs px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded flex items-center gap-1 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+                <Download className="w-3 h-3" /> PDF
+              </button>
               {inv.status === 'draft' && <button onClick={() => updateStatus(inv.id, 'sent')} className="text-xs px-2 py-1 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 rounded">Mark Sent</button>}
               {(inv.status === 'sent' || inv.status === 'overdue') && <button onClick={() => updateStatus(inv.id, 'paid')} className="text-xs px-2 py-1 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 rounded">Mark Paid</button>}
             </div>
