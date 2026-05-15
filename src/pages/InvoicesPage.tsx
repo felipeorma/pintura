@@ -6,6 +6,7 @@ import type { Invoice, Client, WorkHour, Profile, InvoiceItem } from '../lib/typ
 import { Plus, X, FileText, Download, Trash2, Pencil, Eye, Send, History, CheckCircle } from 'lucide-react';
 import { format } from 'date-fns';
 import { generateInvoicePdf } from '../lib/invoicePdf';
+import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
 
 type InvoiceMode = 'hours' | 'service';
 
@@ -55,6 +56,8 @@ export function InvoicesPage() {
 
   // Delete confirm
   const [deleteConfirm, setDeleteConfirm] = useState<Invoice | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Invoice | null>(null);
+  const [deleteUsage, setDeleteUsage] = useState('');
 
   // History
   const [history, setHistory] = useState<InvoiceHistoryEntry[]>([]);
@@ -229,6 +232,31 @@ export function InvoicesPage() {
     await supabase.from('invoice_items').delete().eq('invoice_id', inv.id);
     await supabase.from('invoices').delete().eq('id', inv.id);
     setDeleteConfirm(null);
+    loadData();
+  }
+
+  async function handleDeleteInvoice(invoice: Invoice) {
+    const { count } = await supabase.from('payments').select('id', { count: 'exact', head: true }).eq('invoice_id', invoice.id);
+    if ((count || 0) > 0) {
+      setDeleteUsage(`Cannot delete — ${count} payment(s) linked. Cancel the invoice instead.`);
+    } else {
+      setDeleteUsage('');
+    }
+    setDeleteTarget(invoice);
+  }
+
+  async function confirmDeleteInvoice() {
+    if (!deleteTarget) return;
+    // Restore linked work hours to 'not_invoiced'
+    await supabase.from('invoice_items').select('work_hour_id').eq('invoice_id', deleteTarget.id).then(async ({ data }) => {
+      const workHourIds = (data || []).map(i => i.work_hour_id).filter(Boolean);
+      if (workHourIds.length > 0) {
+        await supabase.from('work_hours').update({ status: 'not_invoiced' }).in('id', workHourIds);
+      }
+    });
+    await supabase.from('invoice_items').delete().eq('invoice_id', deleteTarget.id);
+    await supabase.from('invoices').delete().eq('id', deleteTarget.id);
+    setDeleteTarget(null);
     loadData();
   }
 
@@ -824,9 +852,19 @@ export function InvoicesPage() {
                     </div>
                   )}
                 </div>
-                <div className="text-right">
-                  <p className="text-sm font-semibold text-gray-900 dark:text-white">${inv.total_amount.toFixed(2)}</p>
-                  {inv.balance_due > 0 && inv.status !== 'draft' && <p className="text-xs text-red-500">Due: ${inv.balance_due.toFixed(2)}</p>}
+                <div className="flex items-center gap-2">
+                  <div className="text-right">
+                    <p className="text-sm font-semibold text-gray-900 dark:text-white">${inv.total_amount.toFixed(2)}</p>
+                    {inv.balance_due > 0 && inv.status !== 'draft' && <p className="text-xs text-red-500">Due: ${inv.balance_due.toFixed(2)}</p>}
+                  </div>
+                  <button
+                    onClick={() => handleDeleteInvoice(inv)}
+                    disabled={inv.status === 'paid'}
+                    title={inv.status === 'paid' ? 'Cannot delete paid invoice' : 'Delete invoice'}
+                    className="p-1.5 text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:text-gray-400"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
                 </div>
               </div>
               <div className="mt-2 flex gap-2 flex-wrap">
@@ -850,6 +888,16 @@ export function InvoicesPage() {
           );
         })}
       </div>
+
+      {deleteTarget && (
+        <ConfirmDeleteModal
+          title="Delete Invoice"
+          itemName={deleteTarget.invoice_number}
+          usageInfo={deleteUsage || undefined}
+          onDelete={confirmDeleteInvoice}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
     </div>
   );
 }

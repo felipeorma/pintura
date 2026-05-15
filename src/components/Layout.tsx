@@ -5,7 +5,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import {
   LayoutDashboard, Clock, MapPin, Users, FileText,
   Receipt, Calculator, ShieldCheck, FolderOpen, Settings,
-  Menu, X, Moon, Sun, LogOut, PaintBucket, Car, Home, Lightbulb
+  Menu, X, Moon, Sun, LogOut, PaintBucket, Car, Home
 } from 'lucide-react';
 
 const navItems = [
@@ -17,8 +17,7 @@ const navItems = [
   { to: '/expenses', icon: Receipt, label: 'Expenses' },
   { to: '/vehicle', icon: Car, label: 'Vehicle' },
   { to: '/home-office', icon: Home, label: 'Home Office' },
-  { to: '/tax', icon: Calculator, label: 'GST / Tax' },
-  { to: '/tax-review', icon: Lightbulb, label: 'Tax Planning' },
+  { to: '/tax', icon: Calculator, label: 'Tax Centre' },
   { to: '/wcb', icon: ShieldCheck, label: 'WCB' },
   { to: '/documents', icon: FolderOpen, label: 'Documents' },
   { to: '/settings', icon: Settings, label: 'Settings' },

@@ -1,21 +1,24 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import type { Expense, JobSite, Client } from '../lib/types';
+import type { Expense, JobSite, Client, Profile } from '../lib/types';
 import { EXPENSE_CATEGORY_DATA, PAYMENT_METHODS, TAX_CONFIDENCE_OPTIONS } from '../lib/expenseData';
-import { Plus, X, Receipt, AlertTriangle, Upload } from 'lucide-react';
+import { Plus, X, Receipt, AlertTriangle, Upload, Pencil, Trash2 } from 'lucide-react';
 import { format } from 'date-fns';
+import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
 
 export function ExpensesPage() {
   const { user } = useAuth();
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [jobSites, setJobSites] = useState<JobSite[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
+  const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [filterCategory, setFilterCategory] = useState('all');
   const [uploading, setUploading] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Expense | null>(null);
 
   const [formData, setFormData] = useState({
     expense_date: format(new Date(), 'yyyy-MM-dd'),
@@ -41,14 +44,16 @@ export function ExpensesPage() {
   }, [user]);
 
   async function loadData() {
-    const [expRes, sitesRes, clientsRes] = await Promise.all([
+    const [expRes, sitesRes, clientsRes, profRes] = await Promise.all([
       supabase.from('expenses').select('*, job_sites(site_name)').eq('user_id', user!.id).order('expense_date', { ascending: false }),
       supabase.from('job_sites').select('*').eq('user_id', user!.id).eq('active', true).order('site_name'),
       supabase.from('clients').select('*').eq('user_id', user!.id).eq('active', true).order('name'),
+      supabase.from('profiles').select('*').eq('id', user!.id).maybeSingle(),
     ]);
     setExpenses(expRes.data || []);
     setJobSites(sitesRes.data || []);
     setClients(clientsRes.data || []);
+    setProfile(profRes.data);
     setLoading(false);
   }
 
@@ -57,12 +62,19 @@ export function ExpensesPage() {
 
   function onCategoryChange(cat: string) {
     const catData = EXPENSE_CATEGORY_DATA.find(c => c.name === cat);
+    let bup = 100;
+    if (cat === 'Phone') bup = profile?.phone_business_use_percent ?? 50;
+    else if (cat === 'Internet') bup = profile?.internet_business_use_percent ?? 25;
+    else if (cat === 'Meals') bup = 50;
+    else if (cat === 'Home office') bup = profile?.home_office_percent ?? 100;
+    else if (cat === 'Vehicle / auto' || cat === 'Fuel') bup = profile?.vehicle_business_use_percent ?? 100;
+
     setFormData(f => ({
       ...f,
       category: cat,
       subcategory: '',
       home_office_related: cat === 'Home office',
-      business_use_percent: cat === 'Phone' ? 50 : cat === 'Internet' ? 25 : cat === 'Meals' ? 50 : 100,
+      business_use_percent: bup,
     }));
     if (catData?.subcategories[0]?.needsReview) {
       setFormData(f => ({ ...f, tax_confidence_status: 'needs_review' }));
@@ -162,6 +174,12 @@ export function ExpensesPage() {
     });
     setEditingId(exp.id);
     setShowForm(true);
+  }
+
+  async function deleteExpense(exp: Expense) {
+    await supabase.from('expenses').delete().eq('id', exp.id);
+    setDeleteTarget(null);
+    loadData();
   }
 
   const filtered = filterCategory === 'all' ? expenses : expenses.filter(e => e.category === filterCategory);
@@ -345,7 +363,7 @@ export function ExpensesPage() {
             <p>No expenses recorded</p>
           </div>
         ) : filtered.map(exp => (
-          <div key={exp.id} onClick={() => editExpense(exp)} className="bg-white dark:bg-gray-800 rounded-lg border border-gray-100 dark:border-gray-700 p-3 cursor-pointer hover:border-teal-300 dark:hover:border-teal-700 transition-colors">
+          <div key={exp.id} className="bg-white dark:bg-gray-800 rounded-lg border border-gray-100 dark:border-gray-700 p-3">
             <div className="flex items-center justify-between">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
@@ -358,14 +376,31 @@ export function ExpensesPage() {
                   {exp.description && ` • ${exp.description}`}
                 </p>
               </div>
-              <div className="text-right ml-3">
-                <p className="text-sm font-semibold text-gray-900 dark:text-white">${exp.total_paid.toFixed(2)}</p>
-                <p className="text-xs text-gray-400">{exp.business_use_percent}% biz</p>
+              <div className="flex items-center gap-2 ml-3">
+                <div className="text-right mr-2">
+                  <p className="text-sm font-semibold text-gray-900 dark:text-white">${exp.total_paid.toFixed(2)}</p>
+                  <p className="text-xs text-gray-400">{exp.business_use_percent}% biz</p>
+                </div>
+                <button onClick={() => editExpense(exp)} className="p-1.5 text-gray-400 hover:text-teal-600 dark:hover:text-teal-400 transition-colors" title="Edit">
+                  <Pencil className="w-3.5 h-3.5" />
+                </button>
+                <button onClick={() => setDeleteTarget(exp)} className="p-1.5 text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors" title="Delete">
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
               </div>
             </div>
           </div>
         ))}
       </div>
+
+      {deleteTarget && (
+        <ConfirmDeleteModal
+          title="Delete Expense"
+          itemName={deleteTarget.vendor || deleteTarget.description || 'this expense'}
+          onDelete={() => deleteExpense(deleteTarget)}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
     </div>
   );
 }

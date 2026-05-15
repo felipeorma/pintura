@@ -3,8 +3,9 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { StatusBadge } from '../components/StatusBadge';
 import type { WorkHour, Client, JobSite, Profile } from '../lib/types';
-import { Plus, X, Clock } from 'lucide-react';
+import { Plus, X, Clock, Pencil, Trash2 } from 'lucide-react';
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from 'date-fns';
+import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
 
 export function WorkHoursPage() {
   const { user } = useAuth();
@@ -17,6 +18,7 @@ export function WorkHoursPage() {
   const [view, setView] = useState<'week' | 'month'>('week');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<WorkHour | null>(null);
 
   const [formData, setFormData] = useState({
     work_date: format(new Date(), 'yyyy-MM-dd'),
@@ -135,6 +137,17 @@ export function WorkHoursPage() {
     });
     setEditingId(entry.id);
     setShowForm(true);
+  }
+
+  async function handleDelete(entry: WorkHour) {
+    setDeleteTarget(entry);
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    await supabase.from('work_hours').delete().eq('id', deleteTarget.id);
+    setDeleteTarget(null);
+    loadData();
   }
 
   async function addQuickSite() {
@@ -278,7 +291,7 @@ export function WorkHoursPage() {
             <p>No work hours recorded</p>
           </div>
         ) : filtered.map(entry => (
-          <div key={entry.id} onClick={() => editEntry(entry)} className="bg-white dark:bg-gray-800 rounded-lg border border-gray-100 dark:border-gray-700 p-3 cursor-pointer hover:border-teal-300 dark:hover:border-teal-700 transition-colors">
+          <div key={entry.id} className="bg-white dark:bg-gray-800 rounded-lg border border-gray-100 dark:border-gray-700 p-3 hover:border-teal-300 dark:hover:border-teal-700 transition-colors">
             <div className="flex items-center justify-between">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
@@ -289,14 +302,47 @@ export function WorkHoursPage() {
                   {(entry as any).clients?.name || 'No client'} {(entry as any).job_sites?.site_name ? `• ${(entry as any).job_sites.site_name}` : ''}
                 </p>
               </div>
-              <div className="text-right">
+              <div className="text-right mr-2">
                 <p className="text-sm font-semibold text-gray-900 dark:text-white">{entry.total_hours?.toFixed(1)}h</p>
                 <p className="text-xs text-gray-500 dark:text-gray-400">${entry.subtotal?.toFixed(2)}</p>
+              </div>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => editEntry(entry)}
+                  className="p-1.5 text-gray-400 hover:text-teal-600 dark:hover:text-teal-400 transition-colors"
+                  title="Edit entry"
+                >
+                  <Pencil className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => handleDelete(entry)}
+                  disabled={entry.status === 'invoiced' || entry.status === 'paid'}
+                  className={`p-1.5 text-gray-400 hover:text-red-600 dark:hover:text-red-400 transition-colors ${
+                    entry.status === 'invoiced' || entry.status === 'paid' ? 'opacity-30 cursor-not-allowed' : ''
+                  }`}
+                  title={entry.status === 'invoiced' || entry.status === 'paid' ? 'Cannot delete invoiced entry' : 'Delete entry'}
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
               </div>
             </div>
           </div>
         ))}
       </div>
+
+      {deleteTarget && (
+        <ConfirmDeleteModal
+          title="Delete Work Entry"
+          itemName={`${format(new Date(deleteTarget.work_date + 'T00:00'), 'EEE, MMM d')} - ${deleteTarget.total_hours?.toFixed(1)}h`}
+          usageInfo={
+            deleteTarget.status !== 'not_invoiced'
+              ? `This entry has been ${deleteTarget.status}. It cannot be deleted.`
+              : undefined
+          }
+          onDelete={confirmDelete}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
     </div>
   );
 }

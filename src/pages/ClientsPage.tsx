@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { Client } from '../lib/types';
-import { Plus, X, Users } from 'lucide-react';
+import { Plus, X, Users, Pencil, Archive, ArchiveRestore, Trash2 } from 'lucide-react';
+import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
 
 export function ClientsPage() {
   const { user } = useAuth();
@@ -10,6 +11,7 @@ export function ClientsPage() {
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<Client | null>(null);
 
   const [formData, setFormData] = useState({
     name: '',
@@ -62,8 +64,26 @@ export function ClientsPage() {
     setShowForm(true);
   }
 
-  async function toggleActive(client: Client) {
+  async function toggleArchive(client: Client) {
     await supabase.from('clients').update({ active: !client.active }).eq('id', client.id);
+    loadClients();
+  }
+
+  async function handleDelete(client: Client) {
+    const { count } = await supabase.from('work_hours').select('id', { count: 'exact', head: true }).eq('client_id', client.id);
+    const { count: invCount } = await supabase.from('invoices').select('id', { count: 'exact', head: true }).eq('client_id', client.id);
+    const linked = (count || 0) + (invCount || 0);
+    if (linked > 0) {
+      setDeleteTarget({ ...client, _linkedCount: linked } as any);
+    } else {
+      setDeleteTarget(client);
+    }
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    await supabase.from('clients').delete().eq('id', deleteTarget.id);
+    setDeleteTarget(null);
     loadClients();
   }
 
@@ -125,22 +145,49 @@ export function ClientsPage() {
         ) : clients.map(client => (
           <div key={client.id} className="bg-white dark:bg-gray-800 rounded-lg border border-gray-100 dark:border-gray-700 p-3">
             <div className="flex items-start justify-between">
-              <div className="cursor-pointer flex-1" onClick={() => editClient(client)}>
+              <div className="flex-1">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium text-gray-900 dark:text-white">{client.name}</span>
-                  {!client.active && <span className="text-xs bg-gray-100 dark:bg-gray-700 text-gray-500 px-1.5 py-0.5 rounded">Inactive</span>}
+                  {!client.active && <span className="text-xs bg-gray-100 dark:bg-gray-700 text-gray-500 px-1.5 py-0.5 rounded">Archived</span>}
                 </div>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                   {[client.contact_name, client.phone, client.email].filter(Boolean).join(' • ') || 'No contact info'}
                 </p>
               </div>
-              <button onClick={() => toggleActive(client)} className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
-                {client.active ? 'Deactivate' : 'Activate'}
-              </button>
+              <div className="flex items-center gap-0.5 shrink-0">
+                <button onClick={() => editClient(client)} className="p-1.5 text-gray-400 hover:text-teal-600" title="Edit">
+                  <Pencil className="w-4 h-4" />
+                </button>
+                <button onClick={() => toggleArchive(client)} className="p-1.5 text-gray-400 hover:text-amber-600" title={client.active ? 'Archive' : 'Restore'}>
+                  {client.active ? <Archive className="w-4 h-4" /> : <ArchiveRestore className="w-4 h-4" />}
+                </button>
+                <button onClick={() => handleDelete(client)} className="p-1.5 text-gray-400 hover:text-red-600" title="Delete">
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
             </div>
           </div>
         ))}
       </div>
+
+      {deleteTarget && (
+        <ConfirmDeleteModal
+          title="Delete Client"
+          itemName={deleteTarget.name}
+          usageInfo={
+            (deleteTarget as any)._linkedCount
+              ? `This client has ${(deleteTarget as any)._linkedCount} linked records (work hours or invoices). Archive instead.`
+              : undefined
+          }
+          onDelete={confirmDelete}
+          onArchive={
+            (deleteTarget as any)._linkedCount
+              ? () => { toggleArchive(deleteTarget); setDeleteTarget(null); }
+              : undefined
+          }
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
     </div>
   );
 }

@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { JobSite, Client } from '../lib/types';
-import { Plus, X, MapPin, Search } from 'lucide-react';
+import { Plus, X, MapPin, Search, Pencil, Archive, ArchiveRestore, Trash2 } from 'lucide-react';
+import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
 
 export function JobSitesPage() {
   const { user } = useAuth();
@@ -13,6 +14,8 @@ export function JobSitesPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [siteStats, setSiteStats] = useState<Record<string, { hours: number; amount: number }>>({});
+  const [deleteTarget, setDeleteTarget] = useState<JobSite | null>(null);
+  const [deleteUsage, setDeleteUsage] = useState('');
 
   const [formData, setFormData] = useState({
     site_name: '',
@@ -96,6 +99,23 @@ export function JobSitesPage() {
 
   async function toggleArchive(site: JobSite) {
     await supabase.from('job_sites').update({ active: !site.active }).eq('id', site.id);
+    loadData();
+  }
+
+  async function handleDelete(site: JobSite) {
+    const { count } = await supabase.from('work_hours').select('id', { count: 'exact', head: true }).eq('job_site_id', site.id);
+    if ((count || 0) > 0) {
+      setDeleteUsage(`Cannot delete — ${count} linked work hour records. Archive instead.`);
+    } else {
+      setDeleteUsage('');
+    }
+    setDeleteTarget(site);
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    await supabase.from('job_sites').delete().eq('id', deleteTarget.id);
+    setDeleteTarget(null);
     loadData();
   }
 
@@ -187,7 +207,7 @@ export function JobSitesPage() {
         ) : filtered.map(site => (
           <div key={site.id} className="bg-white dark:bg-gray-800 rounded-lg border border-gray-100 dark:border-gray-700 p-3">
             <div className="flex items-start justify-between">
-              <div className="flex-1 cursor-pointer" onClick={() => editSite(site)}>
+              <div className="flex-1">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium text-gray-900 dark:text-white">{site.site_name}</span>
                   {!site.active && <span className="text-xs bg-gray-100 dark:bg-gray-700 text-gray-500 px-1.5 py-0.5 rounded">Archived</span>}
@@ -203,13 +223,32 @@ export function JobSitesPage() {
                   </p>
                 )}
               </div>
-              <button onClick={() => toggleArchive(site)} className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
-                {site.active ? 'Archive' : 'Restore'}
-              </button>
+              <div className="flex items-center gap-0.5 shrink-0">
+                <button onClick={() => editSite(site)} className="p-1.5 text-gray-400 hover:text-teal-600" title="Edit">
+                  <Pencil className="w-4 h-4" />
+                </button>
+                <button onClick={() => toggleArchive(site)} className="p-1.5 text-gray-400 hover:text-amber-600" title={site.active ? 'Archive' : 'Restore'}>
+                  {site.active ? <Archive className="w-4 h-4" /> : <ArchiveRestore className="w-4 h-4" />}
+                </button>
+                <button onClick={() => handleDelete(site)} className="p-1.5 text-gray-400 hover:text-red-600" title="Delete">
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
             </div>
           </div>
         ))}
       </div>
+
+      {deleteTarget && (
+        <ConfirmDeleteModal
+          title="Delete Job Site"
+          itemName={deleteTarget.site_name}
+          usageInfo={deleteUsage || undefined}
+          onDelete={confirmDelete}
+          onArchive={deleteUsage ? () => { toggleArchive(deleteTarget); setDeleteTarget(null); } : undefined}
+          onCancel={() => setDeleteTarget(null)}
+        />
+      )}
     </div>
   );
 }
