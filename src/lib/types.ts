@@ -4,6 +4,7 @@ export interface Profile {
   business_name: string;
   email: string;
   phone: string;
+  home_address: string | null;
   city: string;
   province: string;
   gst_enabled: boolean;

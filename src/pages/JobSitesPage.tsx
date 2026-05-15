@@ -2,7 +2,26 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { JobSite, Client } from '../lib/types';
-import { Plus, X, MapPin, Search } from 'lucide-react';
+import { Plus, X, MapPin, Search, Navigation } from 'lucide-react';
+
+async function geocode(address: string): Promise<{ lat: number; lon: number } | null> {
+  const res = await fetch(
+    `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(address)}&format=json&limit=1&countrycodes=ca`,
+    { headers: { 'User-Agent': 'Pintura/1.0' } }
+  );
+  const data = await res.json();
+  if (!data.length) return null;
+  return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
+}
+
+async function getDrivingDistanceKm(origin: { lat: number; lon: number }, dest: { lat: number; lon: number }): Promise<number | null> {
+  const res = await fetch(
+    `https://router.project-osrm.org/route/v1/driving/${origin.lon},${origin.lat};${dest.lon},${dest.lat}?overview=false`
+  );
+  const data = await res.json();
+  if (data.code !== 'Ok' || !data.routes?.length) return null;
+  return Math.round((data.routes[0].distance / 1000) * 10) / 10;
+}
 
 export function JobSitesPage() {
   const { user } = useAuth();
@@ -13,6 +32,9 @@ export function JobSitesPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [siteStats, setSiteStats] = useState<Record<string, { hours: number; amount: number }>>({});
+  const [homeAddress, setHomeAddress] = useState<string | null>(null);
+  const [calculatingDistance, setCalculatingDistance] = useState(false);
+  const [distanceError, setDistanceError] = useState<string | null>(null);
 
   const [formData, setFormData] = useState({
     site_name: '',
@@ -30,14 +52,16 @@ export function JobSitesPage() {
   }, [user]);
 
   async function loadData() {
-    const [sitesRes, clientsRes, hoursRes] = await Promise.all([
+    const [sitesRes, clientsRes, hoursRes, profileRes] = await Promise.all([
       supabase.from('job_sites').select('*, clients(name)').eq('user_id', user!.id).order('active', { ascending: false }).order('updated_at', { ascending: false }),
       supabase.from('clients').select('*').eq('user_id', user!.id).eq('active', true).order('name'),
       supabase.from('work_hours').select('job_site_id, total_hours, subtotal').eq('user_id', user!.id),
+      supabase.from('profiles').select('home_address').eq('id', user!.id).maybeSingle(),
     ]);
 
     setSites(sitesRes.data || []);
     setClients(clientsRes.data || []);
+    setHomeAddress(profileRes.data?.home_address || null);
 
     const stats: Record<string, { hours: number; amount: number }> = {};
     (hoursRes.data || []).forEach(h => {
@@ -77,6 +101,7 @@ export function JobSitesPage() {
 
   function resetForm() {
     setFormData({ site_name: '', address: '', city: '', province: 'AB', postal_code: '', client_id: '', distance_from_home_km: '', notes: '' });
+    setDistanceError(null);
   }
 
   function editSite(site: JobSite) {
@@ -91,7 +116,53 @@ export function JobSitesPage() {
       notes: site.notes || '',
     });
     setEditingId(site.id);
+    setDistanceError(null);
     setShowForm(true);
+  }
+
+  async function handleCalculateDistance() {
+    setDistanceError(null);
+
+    const parts = [formData.address, formData.city, formData.province, formData.postal_code].filter(Boolean);
+    const siteAddressStr = parts.join(', ');
+
+    if (!homeAddress) {
+      setDistanceError('Set your home address in Settings first.');
+      return;
+    }
+    if (!siteAddressStr) {
+      setDistanceError('Enter the site address first.');
+      return;
+    }
+
+    setCalculatingDistance(true);
+    try {
+      const [originCoords, destCoords] = await Promise.all([
+        geocode(homeAddress),
+        geocode(siteAddressStr),
+      ]);
+
+      if (!originCoords) {
+        setDistanceError('Could not locate home address.');
+        return;
+      }
+      if (!destCoords) {
+        setDistanceError('Could not locate site address.');
+        return;
+      }
+
+      const km = await getDrivingDistanceKm(originCoords, destCoords);
+      if (km === null) {
+        setDistanceError('Could not calculate route.');
+        return;
+      }
+
+      setFormData(f => ({ ...f, distance_from_home_km: km.toString() }));
+    } catch {
+      setDistanceError('Network error. Try again.');
+    } finally {
+      setCalculatingDistance(false);
+    }
   }
 
   async function toggleArchive(site: JobSite) {
@@ -105,6 +176,9 @@ export function JobSitesPage() {
     s.city?.toLowerCase().includes(search.toLowerCase()) ||
     (s as any).clients?.name?.toLowerCase().includes(search.toLowerCase())
   );
+
+  const siteAddressForCalc = [formData.address, formData.city, formData.province, formData.postal_code].filter(Boolean).join(', ');
+  const canCalculate = !!homeAddress && !!siteAddressForCalc;
 
   if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-2 border-teal-600 border-t-transparent rounded-full" /></div>;
 
@@ -161,10 +235,40 @@ export function JobSitesPage() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Distance from Home (km, one-way)</label>
-                <div className="relative">
-                  <input type="number" value={formData.distance_from_home_km} onChange={e => setFormData(f => ({ ...f, distance_from_home_km: e.target.value }))} min={0} step={0.1} placeholder="e.g. 15.2" className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    value={formData.distance_from_home_km}
+                    onChange={e => setFormData(f => ({ ...f, distance_from_home_km: e.target.value }))}
+                    min={0}
+                    step={0.1}
+                    placeholder="e.g. 15.2"
+                    className="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleCalculateDistance}
+                    disabled={!canCalculate || calculatingDistance}
+                    title={!homeAddress ? 'Set home address in Settings first' : !siteAddressForCalc ? 'Enter site address first' : 'Calculate driving distance'}
+                    className="flex items-center gap-1.5 px-3 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 dark:disabled:bg-gray-600 text-white text-sm font-medium rounded-lg transition-colors disabled:cursor-not-allowed"
+                  >
+                    {calculatingDistance ? (
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    ) : (
+                      <Navigation className="w-4 h-4" />
+                    )}
+                    {calculatingDistance ? 'Calculating…' : 'Auto'}
+                  </button>
                 </div>
-                <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">From 88 Everstone Rise SE. Used to auto-calculate trip km.</p>
+                {distanceError ? (
+                  <p className="text-xs text-red-500 mt-1">{distanceError}</p>
+                ) : (
+                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                    {homeAddress
+                      ? `From: ${homeAddress}`
+                      : 'Set your home address in Settings to enable auto-calculation.'}
+                  </p>
+                )}
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Notes</label>

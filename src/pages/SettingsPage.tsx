@@ -29,6 +29,7 @@ export function SettingsPage() {
       business_name: profile.business_name,
       email: profile.email,
       phone: profile.phone,
+      home_address: profile.home_address,
       city: profile.city,
       province: profile.province,
       gst_enabled: profile.gst_enabled,
@@ -79,6 +80,11 @@ export function SettingsPage() {
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Phone</label>
               <input type="tel" value={profile.phone || ''} onChange={e => update('phone', e.target.value)} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
             </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Home Address</label>
+            <input type="text" value={profile.home_address || ''} onChange={e => update('home_address', e.target.value)} placeholder="e.g. 88 Everstone Rise SE, Calgary, AB" className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+            <p className="text-xs text-gray-400 mt-1">Used to auto-calculate distance to job sites.</p>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
