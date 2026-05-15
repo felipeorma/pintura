@@ -21,6 +21,7 @@ export function JobSitesPage() {
     province: 'AB',
     postal_code: '',
     client_id: '',
+    distance_from_home_km: '',
     notes: '',
   });
 
@@ -59,6 +60,7 @@ export function JobSitesPage() {
       province: formData.province,
       postal_code: formData.postal_code || null,
       client_id: formData.client_id || null,
+      distance_from_home_km: parseFloat(formData.distance_from_home_km) || null,
       notes: formData.notes || null,
     };
 
@@ -74,7 +76,7 @@ export function JobSitesPage() {
   }
 
   function resetForm() {
-    setFormData({ site_name: '', address: '', city: '', province: 'AB', postal_code: '', client_id: '', notes: '' });
+    setFormData({ site_name: '', address: '', city: '', province: 'AB', postal_code: '', client_id: '', distance_from_home_km: '', notes: '' });
   }
 
   function editSite(site: JobSite) {
@@ -85,6 +87,7 @@ export function JobSitesPage() {
       province: site.province,
       postal_code: site.postal_code || '',
       client_id: site.client_id || '',
+      distance_from_home_km: site.distance_from_home_km?.toString() || '',
       notes: site.notes || '',
     });
     setEditingId(site.id);
@@ -157,6 +160,13 @@ export function JobSitesPage() {
                 </div>
               </div>
               <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Distance from Home (km, one-way)</label>
+                <div className="relative">
+                  <input type="number" value={formData.distance_from_home_km} onChange={e => setFormData(f => ({ ...f, distance_from_home_km: e.target.value }))} min={0} step={0.1} placeholder="e.g. 15.2" className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+                </div>
+                <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">From 88 Everstone Rise SE. Used to auto-calculate trip km.</p>
+              </div>
+              <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Notes</label>
                 <textarea value={formData.notes} onChange={e => setFormData(f => ({ ...f, notes: e.target.value }))} rows={2} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
               </div>
@@ -185,6 +195,7 @@ export function JobSitesPage() {
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                   {[site.address, site.city].filter(Boolean).join(', ') || 'No address'}
                   {(site as any).clients?.name && ` • ${(site as any).clients.name}`}
+                  {site.distance_from_home_km && ` • ${site.distance_from_home_km} km`}
                 </p>
                 {siteStats[site.id] && (
                   <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">

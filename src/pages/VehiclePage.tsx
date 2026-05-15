@@ -62,6 +62,8 @@ export function VehiclePage() {
     km_driven: '',
     notes: '',
   });
+  const [roundTrip, setRoundTrip] = useState(true);
+  const [kmManualOverride, setKmManualOverride] = useState(false);
 
   useEffect(() => {
     if (user) loadData();
@@ -111,6 +113,28 @@ export function VehiclePage() {
     loadData();
   }
 
+  function handleJobSiteChange(siteId: string) {
+    setLogForm(f => ({ ...f, job_site_id: siteId }));
+    if (!kmManualOverride && siteId) {
+      const site = jobSites.find(s => s.id === siteId);
+      if (site?.distance_from_home_km) {
+        const km = roundTrip ? site.distance_from_home_km * 2 : site.distance_from_home_km;
+        setLogForm(f => ({ ...f, km_driven: km.toString(), start_location: 'Home', destination: site.site_name }));
+      }
+    }
+  }
+
+  function handleRoundTripToggle(checked: boolean) {
+    setRoundTrip(checked);
+    if (!kmManualOverride && logForm.job_site_id) {
+      const site = jobSites.find(s => s.id === logForm.job_site_id);
+      if (site?.distance_from_home_km) {
+        const km = checked ? site.distance_from_home_km * 2 : site.distance_from_home_km;
+        setLogForm(f => ({ ...f, km_driven: km.toString() }));
+      }
+    }
+  }
+
   async function handleLogSubmit(e: React.FormEvent) {
     e.preventDefault();
     await supabase.from('mileage_logs').insert({
@@ -127,6 +151,8 @@ export function VehiclePage() {
     });
     setShowLogForm(false);
     setLogForm({ log_date: format(new Date(), 'yyyy-MM-dd'), vehicle_id: '', client_id: '', job_site_id: '', start_location: '', destination: '', purpose: '', km_driven: '', notes: '' });
+    setKmManualOverride(false);
+    setRoundTrip(true);
     loadData();
   }
 
@@ -335,12 +361,32 @@ export function VehiclePage() {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Job Site</label>
-                  <select value={logForm.job_site_id} onChange={e => setLogForm(f => ({ ...f, job_site_id: e.target.value }))} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                  <select value={logForm.job_site_id} onChange={e => handleJobSiteChange(e.target.value)} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
                     <option value="">Select...</option>
-                    {jobSites.map(s => <option key={s.id} value={s.id}>{s.site_name}</option>)}
+                    {jobSites.map(s => <option key={s.id} value={s.id}>{s.site_name}{s.distance_from_home_km ? ` (${s.distance_from_home_km} km)` : ''}</option>)}
                   </select>
                 </div>
               </div>
+
+              {logForm.job_site_id && (() => {
+                const selectedSite = jobSites.find(s => s.id === logForm.job_site_id);
+                return selectedSite?.distance_from_home_km ? (
+                  <div className="bg-teal-50 dark:bg-teal-900/20 border border-teal-200 dark:border-teal-800 rounded-lg p-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-teal-700 dark:text-teal-300">
+                        Auto: {selectedSite.distance_from_home_km} km x {roundTrip ? '2 (round trip)' : '1 (one-way)'} = {roundTrip ? (selectedSite.distance_from_home_km * 2).toFixed(1) : selectedSite.distance_from_home_km.toFixed(1)} km
+                      </span>
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input type="checkbox" checked={roundTrip} onChange={e => handleRoundTripToggle(e.target.checked)} className="rounded border-gray-300 text-teal-600 focus:ring-teal-500" />
+                        <span className="text-xs text-teal-700 dark:text-teal-300">Round trip</span>
+                      </label>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-xs text-amber-600 dark:text-amber-400">No distance saved for this site. Enter km manually or update the job site.</p>
+                );
+              })()}
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Start Location</label>
@@ -356,8 +402,16 @@ export function VehiclePage() {
                 <input type="text" value={logForm.purpose} onChange={e => setLogForm(f => ({ ...f, purpose: e.target.value }))} placeholder="e.g. Travel to paint job" className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Kilometres Driven (business)</label>
-                <input type="number" value={logForm.km_driven} onChange={e => setLogForm(f => ({ ...f, km_driven: e.target.value }))} required min={0} step={0.1} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">Kilometres Driven</label>
+                  {logForm.job_site_id && jobSites.find(s => s.id === logForm.job_site_id)?.distance_from_home_km && (
+                    <label className="flex items-center gap-1.5 cursor-pointer">
+                      <input type="checkbox" checked={kmManualOverride} onChange={e => setKmManualOverride(e.target.checked)} className="rounded border-gray-300 text-teal-600 focus:ring-teal-500" />
+                      <span className="text-xs text-gray-500 dark:text-gray-400">Manual</span>
+                    </label>
+                  )}
+                </div>
+                <input type="number" value={logForm.km_driven} onChange={e => { setLogForm(f => ({ ...f, km_driven: e.target.value })); setKmManualOverride(true); }} required min={0} step={0.1} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Notes</label>

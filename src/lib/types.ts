@@ -39,6 +39,7 @@ export interface JobSite {
   city: string | null;
   province: string;
   postal_code: string | null;
+  distance_from_home_km: number | null;
   notes: string | null;
   active: boolean;
   created_at: string;
