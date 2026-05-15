@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { StatusBadge } from '../components/StatusBadge';
-import type { Invoice, Client, WorkHour, Profile } from '../lib/types';
-import { Plus, X, FileText, Download } from 'lucide-react';
+import type { Invoice, Client, WorkHour, Profile, InvoiceItem } from '../lib/types';
+import { Plus, X, FileText, Download, Trash2, Pencil, Eye, Send } from 'lucide-react';
 import { format } from 'date-fns';
 import { generateInvoicePdf } from '../lib/invoicePdf';
 
@@ -31,6 +31,21 @@ export function InvoicesPage() {
 
   const [serviceItems, setServiceItems] = useState<ServiceItem[]>([{ description: '', quantity: 1, rate: 0 }]);
   const [serviceNotes, setServiceNotes] = useState('');
+
+  // Edit state
+  const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
+  const [editItems, setEditItems] = useState<ServiceItem[]>([]);
+  const [editNotes, setEditNotes] = useState('');
+  const [editDate, setEditDate] = useState('');
+  const [editDueDate, setEditDueDate] = useState('');
+
+  // Preview/confirm state
+  const [previewInvoice, setPreviewInvoice] = useState<Invoice | null>(null);
+  const [previewItems, setPreviewItems] = useState<InvoiceItem[]>([]);
+  const [previewClient, setPreviewClient] = useState<Client | null>(null);
+
+  // Delete confirm
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   useEffect(() => {
     if (user) loadData();
@@ -157,6 +172,92 @@ export function InvoicesPage() {
     setInvoiceMode('hours');
   }
 
+  async function deleteInvoice(id: string) {
+    const invoice = invoices.find(i => i.id === id);
+    // Restore work_hours status if they were linked
+    const { data: items } = await supabase.from('invoice_items').select('work_hour_id').eq('invoice_id', id);
+    const workHourIds = (items || []).map(i => i.work_hour_id).filter(Boolean);
+    if (workHourIds.length > 0) {
+      await supabase.from('work_hours').update({ status: 'not_invoiced' }).in('id', workHourIds);
+    }
+    await supabase.from('invoice_items').delete().eq('invoice_id', id);
+    await supabase.from('invoices').delete().eq('id', id);
+    setDeleteConfirm(null);
+    loadData();
+  }
+
+  async function startEdit(inv: Invoice) {
+    const { data: items } = await supabase.from('invoice_items').select('*').eq('invoice_id', inv.id);
+    setEditingInvoice(inv);
+    setEditDate(inv.invoice_date);
+    setEditDueDate(inv.due_date || '');
+    setEditNotes(inv.notes || '');
+    setEditItems((items || []).map(item => ({
+      description: item.description || '',
+      quantity: item.hours || 1,
+      rate: item.rate || 0,
+    })));
+  }
+
+  async function saveEdit() {
+    if (!editingInvoice) return;
+    const validItems = editItems.filter(i => i.description && i.rate > 0);
+    if (validItems.length === 0) return;
+
+    const gstRate = profile?.gst_enabled ? (profile.gst_rate || 5) / 100 : 0;
+    const subtotal = validItems.reduce((s, i) => s + (i.quantity * i.rate), 0);
+    const gstAmount = subtotal * gstRate;
+    const totalAmount = subtotal + gstAmount;
+
+    await supabase.from('invoices').update({
+      invoice_date: editDate,
+      due_date: editDueDate || null,
+      subtotal,
+      gst_amount: gstAmount,
+      total_amount: totalAmount,
+      balance_due: totalAmount,
+      notes: editNotes || null,
+      updated_at: new Date().toISOString(),
+    }).eq('id', editingInvoice.id);
+
+    // Replace items
+    await supabase.from('invoice_items').delete().eq('invoice_id', editingInvoice.id);
+    const newItems = validItems.map(i => ({
+      user_id: user!.id,
+      invoice_id: editingInvoice.id,
+      work_hour_id: null,
+      job_site_id: null,
+      description: i.description,
+      work_date: editDate,
+      hours: i.quantity,
+      rate: i.rate,
+      subtotal: i.quantity * i.rate,
+      gst_amount: (i.quantity * i.rate) * gstRate,
+      total_amount: (i.quantity * i.rate) * (1 + gstRate),
+    }));
+    await supabase.from('invoice_items').insert(newItems);
+
+    setEditingInvoice(null);
+    loadData();
+  }
+
+  async function openPreview(inv: Invoice) {
+    const [itemsRes, clientRes] = await Promise.all([
+      supabase.from('invoice_items').select('*').eq('invoice_id', inv.id),
+      supabase.from('clients').select('*').eq('id', inv.client_id!).maybeSingle(),
+    ]);
+    setPreviewInvoice(inv);
+    setPreviewItems(itemsRes.data || []);
+    setPreviewClient(clientRes.data);
+  }
+
+  async function confirmSend() {
+    if (!previewInvoice) return;
+    await supabase.from('invoices').update({ status: 'sent', updated_at: new Date().toISOString() }).eq('id', previewInvoice.id);
+    setPreviewInvoice(null);
+    loadData();
+  }
+
   async function updateStatus(id: string, status: string) {
     await supabase.from('invoices').update({ status, updated_at: new Date().toISOString() }).eq('id', id);
     if (status === 'paid') {
@@ -208,6 +309,9 @@ export function InvoicesPage() {
   const serviceSubtotal = serviceItems.reduce((s, i) => s + (i.quantity * i.rate), 0);
   const serviceGst = profile?.gst_enabled ? serviceSubtotal * ((profile.gst_rate || 5) / 100) : 0;
 
+  const editSubtotal = editItems.reduce((s, i) => s + (i.quantity * i.rate), 0);
+  const editGst = profile?.gst_enabled ? editSubtotal * ((profile.gst_rate || 5) / 100) : 0;
+
   if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-2 border-teal-600 border-t-transparent rounded-full" /></div>;
 
   return (
@@ -236,23 +340,15 @@ export function InvoicesPage() {
               <button onClick={closeModal} className="p-1 text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
             </div>
             <div className="p-4 space-y-4">
-              {/* Mode Tabs */}
               <div className="flex rounded-lg border border-gray-200 dark:border-gray-600 overflow-hidden">
-                <button
-                  onClick={() => setInvoiceMode('hours')}
-                  className={`flex-1 px-4 py-2 text-sm font-medium transition-colors ${invoiceMode === 'hours' ? 'bg-teal-600 text-white' : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600'}`}
-                >
+                <button onClick={() => setInvoiceMode('hours')} className={`flex-1 px-4 py-2 text-sm font-medium transition-colors ${invoiceMode === 'hours' ? 'bg-teal-600 text-white' : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600'}`}>
                   From Hours
                 </button>
-                <button
-                  onClick={() => setInvoiceMode('service')}
-                  className={`flex-1 px-4 py-2 text-sm font-medium transition-colors ${invoiceMode === 'service' ? 'bg-teal-600 text-white' : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600'}`}
-                >
+                <button onClick={() => setInvoiceMode('service')} className={`flex-1 px-4 py-2 text-sm font-medium transition-colors ${invoiceMode === 'service' ? 'bg-teal-600 text-white' : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600'}`}>
                   Service / Custom
                 </button>
               </div>
 
-              {/* Client Selection */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Client</label>
                 <select value={selectedClient} onChange={e => { setSelectedClient(e.target.value); if (invoiceMode === 'hours') loadUninvoiced(e.target.value); }} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
@@ -261,7 +357,6 @@ export function InvoicesPage() {
                 </select>
               </div>
 
-              {/* Hours Mode */}
               {invoiceMode === 'hours' && (
                 <>
                   {uninvoicedHours.length > 0 && (
@@ -304,7 +399,6 @@ export function InvoicesPage() {
                 </>
               )}
 
-              {/* Service Mode */}
               {invoiceMode === 'service' && selectedClient && (
                 <>
                   <div className="space-y-3">
@@ -317,35 +411,15 @@ export function InvoicesPage() {
                             <button onClick={() => removeServiceItem(i)} className="text-xs text-red-500 hover:text-red-700">Remove</button>
                           )}
                         </div>
-                        <input
-                          type="text"
-                          value={item.description}
-                          onChange={e => updateServiceItem(i, 'description', e.target.value)}
-                          placeholder="Description (e.g. Interior painting - Living room)"
-                          className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                        />
+                        <input type="text" value={item.description} onChange={e => updateServiceItem(i, 'description', e.target.value)} placeholder="Description (e.g. Interior painting - Living room)" className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
                         <div className="grid grid-cols-2 gap-2">
                           <div>
                             <label className="text-xs text-gray-500 dark:text-gray-400">Qty</label>
-                            <input
-                              type="number"
-                              value={item.quantity}
-                              onChange={e => updateServiceItem(i, 'quantity', parseFloat(e.target.value) || 0)}
-                              min={0.01}
-                              step={0.01}
-                              className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                            />
+                            <input type="number" value={item.quantity} onChange={e => updateServiceItem(i, 'quantity', parseFloat(e.target.value) || 0)} min={0.01} step={0.01} className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
                           </div>
                           <div>
                             <label className="text-xs text-gray-500 dark:text-gray-400">Rate ($)</label>
-                            <input
-                              type="number"
-                              value={item.rate}
-                              onChange={e => updateServiceItem(i, 'rate', parseFloat(e.target.value) || 0)}
-                              min={0}
-                              step={0.01}
-                              className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                            />
+                            <input type="number" value={item.rate} onChange={e => updateServiceItem(i, 'rate', parseFloat(e.target.value) || 0)} min={0} step={0.01} className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
                           </div>
                         </div>
                         <p className="text-xs text-right text-gray-600 dark:text-gray-400">Line total: ${(item.quantity * item.rate).toFixed(2)}</p>
@@ -358,13 +432,7 @@ export function InvoicesPage() {
 
                   <div>
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Notes (optional)</label>
-                    <textarea
-                      value={serviceNotes}
-                      onChange={e => setServiceNotes(e.target.value)}
-                      rows={2}
-                      placeholder="Additional notes for this invoice..."
-                      className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                    />
+                    <textarea value={serviceNotes} onChange={e => setServiceNotes(e.target.value)} rows={2} placeholder="Additional notes for this invoice..." className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
                   </div>
 
                   {serviceSubtotal > 0 && (
@@ -386,15 +454,206 @@ export function InvoicesPage() {
                     </div>
                   )}
 
-                  <button
-                    onClick={createInvoiceFromService}
-                    disabled={serviceItems.filter(i => i.description && i.rate > 0).length === 0}
-                    className="w-full py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-medium rounded-lg transition-colors disabled:opacity-50"
-                  >
+                  <button onClick={createInvoiceFromService} disabled={serviceItems.filter(i => i.description && i.rate > 0).length === 0} className="w-full py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-medium rounded-lg transition-colors disabled:opacity-50">
                     Create Invoice
                   </button>
                 </>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Invoice Modal */}
+      {editingInvoice && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-white dark:bg-gray-800 rounded-xl w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-xl">
+            <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Edit {editingInvoice.invoice_number}</h2>
+              <button onClick={() => setEditingInvoice(null)} className="p-1 text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-4 space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Invoice Date</label>
+                  <input type="date" value={editDate} onChange={e => setEditDate(e.target.value)} className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Due Date</label>
+                  <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)} className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <p className="text-sm font-medium text-gray-700 dark:text-gray-300">Line Items</p>
+                {editItems.map((item, i) => (
+                  <div key={i} className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Item {i + 1}</span>
+                      {editItems.length > 1 && (
+                        <button onClick={() => setEditItems(editItems.filter((_, idx) => idx !== i))} className="text-xs text-red-500 hover:text-red-700">Remove</button>
+                      )}
+                    </div>
+                    <input type="text" value={item.description} onChange={e => { const u = [...editItems]; u[i] = { ...u[i], description: e.target.value }; setEditItems(u); }} placeholder="Description" className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-xs text-gray-500 dark:text-gray-400">Qty</label>
+                        <input type="number" value={item.quantity} onChange={e => { const u = [...editItems]; u[i] = { ...u[i], quantity: parseFloat(e.target.value) || 0 }; setEditItems(u); }} min={0.01} step={0.01} className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+                      </div>
+                      <div>
+                        <label className="text-xs text-gray-500 dark:text-gray-400">Rate ($)</label>
+                        <input type="number" value={item.rate} onChange={e => { const u = [...editItems]; u[i] = { ...u[i], rate: parseFloat(e.target.value) || 0 }; setEditItems(u); }} min={0} step={0.01} className="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+                      </div>
+                    </div>
+                    <p className="text-xs text-right text-gray-600 dark:text-gray-400">Line total: ${(item.quantity * item.rate).toFixed(2)}</p>
+                  </div>
+                ))}
+                <button onClick={() => setEditItems([...editItems, { description: '', quantity: 1, rate: 0 }])} className="w-full py-2 border border-dashed border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                  + Add another item
+                </button>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Notes (optional)</label>
+                <textarea value={editNotes} onChange={e => setEditNotes(e.target.value)} rows={2} className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+              </div>
+
+              {editSubtotal > 0 && (
+                <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 space-y-1">
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600 dark:text-gray-400">Subtotal:</span>
+                    <span className="font-medium text-gray-900 dark:text-white">${editSubtotal.toFixed(2)}</span>
+                  </div>
+                  {profile?.gst_enabled && (
+                    <div className="flex justify-between text-sm">
+                      <span className="text-gray-600 dark:text-gray-400">GST ({profile.gst_rate || 5}%):</span>
+                      <span className="font-medium text-gray-900 dark:text-white">${editGst.toFixed(2)}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between text-sm font-bold pt-1 border-t border-gray-200 dark:border-gray-600">
+                    <span className="text-gray-900 dark:text-white">Total:</span>
+                    <span className="text-gray-900 dark:text-white">${(editSubtotal + editGst).toFixed(2)}</span>
+                  </div>
+                </div>
+              )}
+
+              <button onClick={saveEdit} disabled={editItems.filter(i => i.description && i.rate > 0).length === 0} className="w-full py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-medium rounded-lg transition-colors disabled:opacity-50">
+                Save Changes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Preview / Confirm Send Modal */}
+      {previewInvoice && previewClient && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-white dark:bg-gray-800 rounded-xl w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-xl">
+            <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Invoice Preview</h2>
+              <button onClick={() => setPreviewInvoice(null)} className="p-1 text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-4 space-y-4">
+              {/* Header info */}
+              <div className="flex justify-between items-start">
+                <div>
+                  <p className="text-lg font-bold text-teal-700 dark:text-teal-400">{previewInvoice.invoice_number}</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">{format(new Date(previewInvoice.invoice_date + 'T00:00'), 'MMMM d, yyyy')}</p>
+                  {previewInvoice.due_date && (
+                    <p className="text-xs text-gray-400 dark:text-gray-500">Due: {format(new Date(previewInvoice.due_date + 'T00:00'), 'MMMM d, yyyy')}</p>
+                  )}
+                </div>
+                <div className="text-right">
+                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300">{profile?.business_name || profile?.full_name}</p>
+                  {profile?.gst_number && <p className="text-xs text-gray-400">GST# {profile.gst_number}</p>}
+                </div>
+              </div>
+
+              {/* Bill to */}
+              <div className="bg-gray-50 dark:bg-gray-700/30 rounded-lg p-3">
+                <p className="text-xs font-semibold uppercase text-gray-400 dark:text-gray-500 mb-1">Bill To</p>
+                <p className="text-sm font-medium text-gray-900 dark:text-white">{previewClient.name}</p>
+                {previewClient.contact_name && <p className="text-xs text-gray-500">{previewClient.contact_name}</p>}
+                {previewClient.email && <p className="text-xs text-gray-500">{previewClient.email}</p>}
+              </div>
+
+              {/* Items */}
+              <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-50 dark:bg-gray-700/50 border-b border-gray-200 dark:border-gray-700">
+                      <th className="text-left px-3 py-2 text-xs font-semibold text-gray-500 dark:text-gray-400">Description</th>
+                      <th className="text-center px-3 py-2 text-xs font-semibold text-gray-500 dark:text-gray-400">Qty</th>
+                      <th className="text-right px-3 py-2 text-xs font-semibold text-gray-500 dark:text-gray-400">Rate</th>
+                      <th className="text-right px-3 py-2 text-xs font-semibold text-gray-500 dark:text-gray-400">Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {previewItems.map((item, i) => (
+                      <tr key={i} className="border-b border-gray-100 dark:border-gray-700/50 last:border-0">
+                        <td className="px-3 py-2 text-gray-900 dark:text-white">{item.description || 'Service'}</td>
+                        <td className="px-3 py-2 text-center text-gray-600 dark:text-gray-400">{item.hours?.toFixed(1) || '-'}</td>
+                        <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-400">{item.rate ? `$${item.rate.toFixed(2)}` : '-'}</td>
+                        <td className="px-3 py-2 text-right font-medium text-gray-900 dark:text-white">${(item.subtotal || 0).toFixed(2)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Totals */}
+              <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 space-y-1">
+                <div className="flex justify-between text-sm">
+                  <span className="text-gray-600 dark:text-gray-400">Subtotal</span>
+                  <span className="text-gray-900 dark:text-white">${previewInvoice.subtotal.toFixed(2)}</span>
+                </div>
+                {previewInvoice.gst_amount > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-gray-600 dark:text-gray-400">GST</span>
+                    <span className="text-gray-900 dark:text-white">${previewInvoice.gst_amount.toFixed(2)}</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-base font-bold pt-1 border-t border-gray-200 dark:border-gray-600">
+                  <span className="text-gray-900 dark:text-white">Total</span>
+                  <span className="text-teal-700 dark:text-teal-400">${previewInvoice.total_amount.toFixed(2)}</span>
+                </div>
+              </div>
+
+              {previewInvoice.notes && (
+                <div className="text-xs text-gray-500 dark:text-gray-400 italic">
+                  {previewInvoice.notes}
+                </div>
+              )}
+
+              {/* Action buttons */}
+              <div className="flex gap-3 pt-2">
+                <button onClick={() => setPreviewInvoice(null)} className="flex-1 py-2.5 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 font-medium rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                  Cancel
+                </button>
+                <button onClick={confirmSend} className="flex-1 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2">
+                  <Send className="w-4 h-4" /> Confirm & Mark Sent
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delete Confirmation */}
+      {deleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-white dark:bg-gray-800 rounded-xl w-full max-w-sm shadow-xl p-6">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Delete Invoice?</h3>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+              This will permanently delete this invoice and restore any linked work hours to "not invoiced" status. This cannot be undone.
+            </p>
+            <div className="flex gap-3">
+              <button onClick={() => setDeleteConfirm(null)} className="flex-1 py-2.5 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 font-medium rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                Cancel
+              </button>
+              <button onClick={() => deleteInvoice(deleteConfirm)} className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg transition-colors">
+                Delete
+              </button>
             </div>
           </div>
         </div>
@@ -421,15 +680,29 @@ export function InvoicesPage() {
               </div>
               <div className="text-right">
                 <p className="text-sm font-semibold text-gray-900 dark:text-white">${inv.total_amount.toFixed(2)}</p>
-                {inv.balance_due > 0 && <p className="text-xs text-red-500">Due: ${inv.balance_due.toFixed(2)}</p>}
+                {inv.balance_due > 0 && inv.status !== 'draft' && <p className="text-xs text-red-500">Due: ${inv.balance_due.toFixed(2)}</p>}
               </div>
             </div>
-            <div className="mt-2 flex gap-2">
+            <div className="mt-2 flex gap-2 flex-wrap">
               <button onClick={() => downloadPdf(inv)} className="text-xs px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded flex items-center gap-1 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
                 <Download className="w-3 h-3" /> PDF
               </button>
-              {inv.status === 'draft' && <button onClick={() => updateStatus(inv.id, 'sent')} className="text-xs px-2 py-1 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 rounded">Mark Sent</button>}
-              {(inv.status === 'sent' || inv.status === 'overdue') && <button onClick={() => updateStatus(inv.id, 'paid')} className="text-xs px-2 py-1 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 rounded">Mark Paid</button>}
+              {inv.status === 'draft' && (
+                <>
+                  <button onClick={() => openPreview(inv)} className="text-xs px-2 py-1 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 rounded flex items-center gap-1 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors">
+                    <Eye className="w-3 h-3" /> Preview & Send
+                  </button>
+                  <button onClick={() => startEdit(inv)} className="text-xs px-2 py-1 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 rounded flex items-center gap-1 hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors">
+                    <Pencil className="w-3 h-3" /> Edit
+                  </button>
+                  <button onClick={() => setDeleteConfirm(inv.id)} className="text-xs px-2 py-1 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 rounded flex items-center gap-1 hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors">
+                    <Trash2 className="w-3 h-3" /> Delete
+                  </button>
+                </>
+              )}
+              {(inv.status === 'sent' || inv.status === 'overdue') && (
+                <button onClick={() => updateStatus(inv.id, 'paid')} className="text-xs px-2 py-1 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 rounded">Mark Paid</button>
+              )}
             </div>
           </div>
         ))}
