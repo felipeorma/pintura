@@ -134,19 +134,23 @@ export function InvoicesPage() {
     }).select().single();
 
     if (invoice) {
-      const items = hours.map(h => ({
-        user_id: user!.id,
-        invoice_id: invoice.id,
-        work_hour_id: h.id,
-        job_site_id: h.job_site_id,
-        description: (h as any).job_sites?.site_name || 'Painting services',
-        work_date: h.work_date,
-        hours: h.total_hours,
-        rate: h.hourly_rate,
-        subtotal: h.subtotal,
-        gst_amount: h.gst_amount,
-        total_amount: (h.subtotal || 0) + (h.gst_amount || 0),
-      }));
+      const items = hours.map(h => {
+        const siteName = (h as any).job_sites?.site_name || 'Painting services';
+        const timeRange = h.start_time && h.end_time ? ` (${h.start_time.slice(0, 5)} - ${h.end_time.slice(0, 5)})` : '';
+        return {
+          user_id: user!.id,
+          invoice_id: invoice.id,
+          work_hour_id: h.id,
+          job_site_id: h.job_site_id,
+          description: `${siteName}${timeRange}`,
+          work_date: h.work_date,
+          hours: h.total_hours,
+          rate: h.hourly_rate,
+          subtotal: h.subtotal,
+          gst_amount: h.gst_amount,
+          total_amount: (h.subtotal || 0) + (h.gst_amount || 0),
+        };
+      });
       await supabase.from('invoice_items').insert(items);
       await supabase.from('work_hours').update({ status: 'invoiced' }).in('id', Array.from(selectedHours));
     }
@@ -418,7 +422,11 @@ export function InvoicesPage() {
                             <input type="checkbox" checked={selectedHours.has(h.id)} onChange={() => toggleHour(h.id)} className="rounded border-gray-300 text-teal-600 focus:ring-teal-500" />
                             <div className="flex-1">
                               <span className="text-sm text-gray-900 dark:text-white">{format(new Date(h.work_date + 'T00:00'), 'MMM d')} - {h.total_hours?.toFixed(1)}h</span>
-                              <span className="text-xs text-gray-500 ml-2">{(h as any).job_sites?.site_name}</span>
+                              {h.start_time && h.end_time && (
+                                <span className="text-xs text-gray-400 dark:text-gray-500 ml-1">({h.start_time.slice(0, 5)} - {h.end_time.slice(0, 5)})</span>
+                              )}
+                              <br />
+                              <span className="text-xs text-gray-500">{(h as any).job_sites?.site_name}</span>
                             </div>
                             <span className="text-sm font-medium text-gray-700 dark:text-gray-300">${h.subtotal?.toFixed(2)}</span>
                           </label>
@@ -614,7 +622,6 @@ export function InvoicesPage() {
                 </div>
                 <div className="text-right">
                   <p className="text-sm font-medium text-gray-700 dark:text-gray-300">{profile?.business_name || profile?.full_name}</p>
-                  {profile?.gst_number && <p className="text-xs text-gray-400">GST# {profile.gst_number}</p>}
                 </div>
               </div>
 
