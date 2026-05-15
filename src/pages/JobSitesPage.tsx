@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { JobSite, Client } from '../lib/types';
-import { Plus, X, MapPin, Search } from 'lucide-react';
+import { Plus, X, MapPin, Search, Pencil, Trash2, Archive, ArchiveRestore } from 'lucide-react';
 
 export function JobSitesPage() {
   const { user } = useAuth();
@@ -12,7 +12,8 @@ export function JobSitesPage() {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  const [siteStats, setSiteStats] = useState<Record<string, { hours: number; amount: number }>>({});
+  const [siteStats, setSiteStats] = useState<Record<string, { hours: number; amount: number; count: number }>>({});
+  const [deleteConfirm, setDeleteConfirm] = useState<JobSite | null>(null);
 
   const [formData, setFormData] = useState({
     site_name: '',
@@ -39,12 +40,13 @@ export function JobSitesPage() {
     setSites(sitesRes.data || []);
     setClients(clientsRes.data || []);
 
-    const stats: Record<string, { hours: number; amount: number }> = {};
+    const stats: Record<string, { hours: number; amount: number; count: number }> = {};
     (hoursRes.data || []).forEach(h => {
       if (!h.job_site_id) return;
-      if (!stats[h.job_site_id]) stats[h.job_site_id] = { hours: 0, amount: 0 };
+      if (!stats[h.job_site_id]) stats[h.job_site_id] = { hours: 0, amount: 0, count: 0 };
       stats[h.job_site_id].hours += h.total_hours || 0;
       stats[h.job_site_id].amount += h.subtotal || 0;
+      stats[h.job_site_id].count += 1;
     });
     setSiteStats(stats);
     setLoading(false);
@@ -79,7 +81,8 @@ export function JobSitesPage() {
     setFormData({ site_name: '', address: '', city: '', province: 'AB', postal_code: '', client_id: '', distance_from_home_km: '', notes: '' });
   }
 
-  function editSite(site: JobSite) {
+  function editSite(site: JobSite, e?: React.MouseEvent) {
+    if (e) e.stopPropagation();
     setFormData({
       site_name: site.site_name,
       address: site.address || '',
@@ -94,8 +97,40 @@ export function JobSitesPage() {
     setShowForm(true);
   }
 
-  async function toggleArchive(site: JobSite) {
+  async function toggleArchive(site: JobSite, e: React.MouseEvent) {
+    e.stopPropagation();
     await supabase.from('job_sites').update({ active: !site.active }).eq('id', site.id);
+    loadData();
+  }
+
+  function requestDelete(site: JobSite, e: React.MouseEvent) {
+    e.stopPropagation();
+    setDeleteConfirm(site);
+  }
+
+  async function confirmDelete() {
+    if (!deleteConfirm) return;
+
+    // Safety: never permanently delete a site that has work_hours linked.
+    // The DB likely has a FK that would block it anyway, but we catch it here
+    // and offer the user a clear path (archive instead).
+    const usageCount = siteStats[deleteConfirm.id]?.count || 0;
+    if (usageCount > 0) {
+      alert(
+        `This site has ${usageCount} work hour ${usageCount === 1 ? 'entry' : 'entries'} linked to it and cannot be deleted.\n\n` +
+        `Archive it instead — it will be hidden from the dropdowns but the history stays intact.`
+      );
+      setDeleteConfirm(null);
+      return;
+    }
+
+    const { error } = await supabase.from('job_sites').delete().eq('id', deleteConfirm.id);
+    if (error) {
+      alert('Error deleting site: ' + error.message);
+      setDeleteConfirm(null);
+      return;
+    }
+    setDeleteConfirm(null);
     loadData();
   }
 
@@ -122,6 +157,7 @@ export function JobSitesPage() {
         <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search sites..." className="w-full pl-9 pr-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-sm" />
       </div>
 
+      {/* Add / Edit Form Modal */}
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
           <div className="bg-white dark:bg-gray-800 rounded-xl w-full max-w-md max-h-[90vh] overflow-y-auto shadow-xl">
@@ -178,37 +214,113 @@ export function JobSitesPage() {
         </div>
       )}
 
+      {/* Delete Confirmation Modal */}
+      {deleteConfirm && (() => {
+        const usage = siteStats[deleteConfirm.id]?.count || 0;
+        const hasUsage = usage > 0;
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+            <div className="bg-white dark:bg-gray-800 rounded-xl w-full max-w-sm shadow-xl p-6">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">
+                {hasUsage ? 'Cannot Delete Site' : 'Delete Site?'}
+              </h3>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                <span className="font-medium">{deleteConfirm.site_name}</span>
+              </p>
+              {hasUsage ? (
+                <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3 mb-4 text-xs text-amber-700 dark:text-amber-300">
+                  This site has <strong>{usage} work hour {usage === 1 ? 'entry' : 'entries'}</strong> linked to it.
+                  Permanent deletion would break those records.
+                  <br /><br />
+                  Use <strong>Archive</strong> instead — the site will be hidden from new entries but the history stays intact.
+                </div>
+              ) : (
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-4">
+                  This will permanently delete this job site. This cannot be undone.
+                </p>
+              )}
+              <div className="flex gap-3">
+                <button onClick={() => setDeleteConfirm(null)} className="flex-1 py-2.5 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 font-medium rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+                  Cancel
+                </button>
+                {hasUsage ? (
+                  <button
+                    onClick={async () => {
+                      await supabase.from('job_sites').update({ active: false }).eq('id', deleteConfirm.id);
+                      setDeleteConfirm(null);
+                      loadData();
+                    }}
+                    className="flex-1 py-2.5 bg-amber-600 hover:bg-amber-700 text-white font-medium rounded-lg transition-colors"
+                  >
+                    Archive Instead
+                  </button>
+                ) : (
+                  <button onClick={confirmDelete} className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg transition-colors">
+                    Delete
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Sites list */}
       <div className="space-y-2">
         {filtered.length === 0 ? (
           <div className="text-center py-12 text-gray-400 dark:text-gray-500">
             <MapPin className="w-10 h-10 mx-auto mb-2 opacity-50" />
             <p>No job sites yet</p>
           </div>
-        ) : filtered.map(site => (
-          <div key={site.id} className="bg-white dark:bg-gray-800 rounded-lg border border-gray-100 dark:border-gray-700 p-3">
-            <div className="flex items-start justify-between">
-              <div className="flex-1 cursor-pointer" onClick={() => editSite(site)}>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-gray-900 dark:text-white">{site.site_name}</span>
-                  {!site.active && <span className="text-xs bg-gray-100 dark:bg-gray-700 text-gray-500 px-1.5 py-0.5 rounded">Archived</span>}
-                </div>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                  {[site.address, site.city].filter(Boolean).join(', ') || 'No address'}
-                  {(site as any).clients?.name && ` • ${(site as any).clients.name}`}
-                  {site.distance_from_home_km && ` • ${site.distance_from_home_km} km`}
-                </p>
-                {siteStats[site.id] && (
-                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-                    {siteStats[site.id].hours.toFixed(1)}h total • ${siteStats[site.id].amount.toFixed(0)} earned
+        ) : filtered.map(site => {
+          const hasUsage = (siteStats[site.id]?.count || 0) > 0;
+          return (
+            <div key={site.id} className="bg-white dark:bg-gray-800 rounded-lg border border-gray-100 dark:border-gray-700 p-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1 min-w-0 cursor-pointer" onClick={() => editSite(site)}>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-medium text-gray-900 dark:text-white">{site.site_name}</span>
+                    {!site.active && <span className="text-xs bg-gray-100 dark:bg-gray-700 text-gray-500 px-1.5 py-0.5 rounded">Archived</span>}
+                  </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    {[site.address, site.city].filter(Boolean).join(', ') || 'No address'}
+                    {(site as any).clients?.name && ` • ${(site as any).clients.name}`}
+                    {site.distance_from_home_km && ` • ${site.distance_from_home_km} km`}
                   </p>
-                )}
+                  {siteStats[site.id] && (
+                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                      {siteStats[site.id].hours.toFixed(1)}h total • ${siteStats[site.id].amount.toFixed(0)} earned
+                    </p>
+                  )}
+                </div>
+                <div className="flex items-center gap-1 flex-shrink-0">
+                  <button
+                    onClick={(e) => editSite(site, e)}
+                    className="p-1.5 text-gray-400 hover:text-teal-600 hover:bg-teal-50 dark:hover:bg-teal-900/20 rounded-md transition-colors"
+                    title="Edit"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={(e) => toggleArchive(site, e)}
+                    className="p-1.5 text-gray-400 hover:text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-900/20 rounded-md transition-colors"
+                    title={site.active ? 'Archive' : 'Restore'}
+                  >
+                    {site.active ? <Archive className="w-4 h-4" /> : <ArchiveRestore className="w-4 h-4" />}
+                  </button>
+                  <button
+                    onClick={(e) => requestDelete(site, e)}
+                    disabled={hasUsage}
+                    className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-md transition-colors disabled:opacity-30 disabled:cursor-not-allowed disabled:hover:text-gray-400 disabled:hover:bg-transparent"
+                    title={hasUsage ? `Cannot delete — ${siteStats[site.id].count} entries linked. Archive instead.` : 'Delete permanently'}
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
-              <button onClick={() => toggleArchive(site)} className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
-                {site.active ? 'Archive' : 'Restore'}
-              </button>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
