@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { StatusBadge } from '../components/StatusBadge';
 import type { Invoice, Client, WorkHour, Profile, InvoiceItem } from '../lib/types';
-import { Plus, X, FileText, Download, Trash2, Pencil, Eye, Send, History, CheckCircle, Mail, AlertCircle } from 'lucide-react';
+import { Plus, X, FileText, Download, Trash2, Pencil, Eye, Send, History, CheckCircle } from 'lucide-react';
 import { format } from 'date-fns';
 import { generateInvoicePdf } from '../lib/invoicePdf';
 
@@ -59,7 +59,7 @@ export function InvoicesPage() {
   // History
   const [history, setHistory] = useState<InvoiceHistoryEntry[]>([]);
   const [showHistory, setShowHistory] = useState(false);
-  const [invoiceFlags, setInvoiceFlags] = useState<Record<string, { downloaded: boolean; sent: boolean; sentTo?: string }>>({});
+  const [invoiceFlags, setInvoiceFlags] = useState<Record<string, { downloaded: boolean; sent: boolean }>>({});
 
   useEffect(() => {
     if (user) loadData();
@@ -67,7 +67,7 @@ export function InvoicesPage() {
 
   async function loadData() {
     const [invRes, clientsRes, profileRes, historyRes] = await Promise.all([
-      supabase.from('invoices').select('*, clients(name, email)').eq('user_id', user!.id).order('invoice_date', { ascending: false }),
+      supabase.from('invoices').select('*, clients(name)').eq('user_id', user!.id).order('invoice_date', { ascending: false }),
       supabase.from('clients').select('*').eq('user_id', user!.id).eq('active', true).order('name'),
       supabase.from('profiles').select('*').eq('id', user!.id).maybeSingle(),
       supabase.from('invoice_history').select('*').eq('user_id', user!.id).order('created_at', { ascending: false }),
@@ -77,18 +77,13 @@ export function InvoicesPage() {
     setProfile(profileRes.data);
     setHistory(historyRes.data || []);
 
-    // Build flags per invoice — capture the "sent to" email from the history note
-    const flags: Record<string, { downloaded: boolean; sent: boolean; sentTo?: string }> = {};
+    // Build flags per invoice
+    const flags: Record<string, { downloaded: boolean; sent: boolean }> = {};
     (historyRes.data || []).forEach((h: InvoiceHistoryEntry) => {
       if (!h.invoice_id) return;
       if (!flags[h.invoice_id]) flags[h.invoice_id] = { downloaded: false, sent: false };
       if (h.action === 'downloaded') flags[h.invoice_id].downloaded = true;
-      if (h.action === 'sent') {
-        flags[h.invoice_id].sent = true;
-        // Extract email from note if it follows the pattern "Recipient: <email>"
-        const match = h.note?.match(/Recipient:\s*(\S+@\S+)/);
-        if (match) flags[h.invoice_id].sentTo = match[1];
-      }
+      if (h.action === 'sent') flags[h.invoice_id].sent = true;
     });
     setInvoiceFlags(flags);
 
@@ -98,7 +93,6 @@ export function InvoicesPage() {
   async function loadUninvoiced(clientId: string) {
     setSelectedClient(clientId);
     if (!clientId) { setUninvoicedHours([]); return; }
-    // Only show CONFIRMED hours (status = 'not_invoiced'). Pending entries don't appear here.
     const { data } = await supabase.from('work_hours').select('*, job_sites(site_name)').eq('user_id', user!.id).eq('client_id', clientId).eq('status', 'not_invoiced').order('work_date');
     setUninvoicedHours(data || []);
     setSelectedHours(new Set());
@@ -223,12 +217,10 @@ export function InvoicesPage() {
     // Log history with status info before deleting
     const statusLabel = inv.status === 'sent' || inv.status === 'paid' ? 'Sent' : 'Not sent';
     const wasDownloaded = invoiceFlags[inv.id]?.downloaded;
-    const sentTo = invoiceFlags[inv.id]?.sentTo;
-    const note = `Status at deletion: ${statusLabel}${sentTo ? ` (Recipient: ${sentTo})` : ''}${wasDownloaded ? ', Downloaded' : ''}`;
+    const note = `Status at deletion: ${statusLabel}${wasDownloaded ? ', Downloaded' : ''}`;
     await logHistory(null, inv.invoice_number, 'deleted', note);
 
-    // Restore work_hours status if they were linked. They go back to 'not_invoiced'
-    // (already confirmed — no need to re-validate)
+    // Restore work_hours status if they were linked
     const { data: items } = await supabase.from('invoice_items').select('work_hour_id').eq('invoice_id', inv.id);
     const workHourIds = (items || []).map(i => i.work_hour_id).filter(Boolean);
     if (workHourIds.length > 0) {
@@ -305,38 +297,10 @@ export function InvoicesPage() {
     setPreviewClient(clientRes.data);
   }
 
-  /**
-   * Manually mark an invoice as sent.
-   * IMPORTANT: This does NOT send any email automatically.
-   * It only records that the user manually sent the invoice (by their own means)
-   * and stores the client's email at the time of sending as proof of recipient.
-   */
-  async function markAsSent() {
-    if (!previewInvoice || !previewClient) return;
-
-    const recipientEmail = previewClient.email || 'No email on file';
-    const recipientName = previewClient.contact_name || previewClient.name;
-
-    const confirmMsg =
-      `Mark this invoice as SENT?\n\n` +
-      `This will NOT send any email automatically.\n` +
-      `It only records that you manually sent it.\n\n` +
-      `Recipient on record:\n` +
-      `  ${recipientName}\n` +
-      `  ${recipientEmail}\n\n` +
-      `Make sure you have already sent the invoice by your own means (email, WhatsApp, in person, etc.) before confirming.`;
-
-    if (!confirm(confirmMsg)) return;
-
-    await supabase.from('invoices').update({
-      status: 'sent',
-      updated_at: new Date().toISOString(),
-    }).eq('id', previewInvoice.id);
-
-    // Log who the recipient was at the time of sending — this is the audit trail
-    const note = `Recipient: ${recipientEmail} (${recipientName})`;
-    await logHistory(previewInvoice.id, previewInvoice.invoice_number, 'sent', note);
-
+  async function confirmSend() {
+    if (!previewInvoice) return;
+    await supabase.from('invoices').update({ status: 'sent', updated_at: new Date().toISOString() }).eq('id', previewInvoice.id);
+    await logHistory(previewInvoice.id, previewInvoice.invoice_number, 'sent');
     setPreviewInvoice(null);
     loadData();
   }
@@ -451,7 +415,7 @@ export function InvoicesPage() {
                 <>
                   {uninvoicedHours.length > 0 && (
                     <>
-                      <p className="text-sm text-gray-500 dark:text-gray-400">Select confirmed hours to include:</p>
+                      <p className="text-sm text-gray-500 dark:text-gray-400">Select hours to include:</p>
                       <div className="space-y-1 max-h-60 overflow-y-auto">
                         {uninvoicedHours.map(h => (
                           <label key={h.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer">
@@ -488,12 +452,7 @@ export function InvoicesPage() {
                     </>
                   )}
                   {selectedClient && uninvoicedHours.length === 0 && (
-                    <div className="text-center py-4 text-sm">
-                      <p className="text-gray-400 dark:text-gray-500">No confirmed hours available for this client</p>
-                      <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
-                        Pending hours must be validated in the Work Hours page first.
-                      </p>
-                    </div>
+                    <p className="text-sm text-gray-400 dark:text-gray-500 text-center py-4">No uninvoiced hours for this client</p>
                   )}
                 </>
               )}
@@ -670,15 +629,7 @@ export function InvoicesPage() {
                 <p className="text-xs font-semibold uppercase text-gray-400 dark:text-gray-500 mb-1">Bill To</p>
                 <p className="text-sm font-medium text-gray-900 dark:text-white">{previewClient.name}</p>
                 {previewClient.contact_name && <p className="text-xs text-gray-500">{previewClient.contact_name}</p>}
-                {previewClient.email ? (
-                  <p className="text-xs text-gray-500 flex items-center gap-1">
-                    <Mail className="w-3 h-3" /> {previewClient.email}
-                  </p>
-                ) : (
-                  <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3" /> No email on file
-                  </p>
-                )}
+                {previewClient.email && <p className="text-xs text-gray-500">{previewClient.email}</p>}
               </div>
 
               <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
@@ -729,27 +680,13 @@ export function InvoicesPage() {
                 <div className="text-xs text-gray-500 dark:text-gray-400 italic">{previewInvoice.notes}</div>
               )}
 
-              {/* Manual send notice */}
-              {previewInvoice.status === 'draft' && (
-                <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3 text-xs text-amber-700 dark:text-amber-300">
-                  <p className="font-semibold flex items-center gap-1 mb-1">
-                    <AlertCircle className="w-3.5 h-3.5" /> No automatic sending
-                  </p>
-                  <p>
-                    This app does not send emails. Use the <strong>PDF</strong> button to download
-                    the invoice and send it manually (email, WhatsApp, in person). Then click
-                    <strong> Mark as Sent</strong> to record it.
-                  </p>
-                </div>
-              )}
-
               <div className="flex gap-3 pt-2">
                 <button onClick={() => setPreviewInvoice(null)} className="flex-1 py-2.5 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 font-medium rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
                   Close
                 </button>
                 {previewInvoice.status === 'draft' && (
-                  <button onClick={markAsSent} className="flex-1 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2">
-                    <Send className="w-4 h-4" /> Mark as Sent
+                  <button onClick={confirmSend} className="flex-1 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2">
+                    <Send className="w-4 h-4" /> Confirm & Mark Sent
                   </button>
                 )}
               </div>
@@ -767,10 +704,10 @@ export function InvoicesPage() {
               <p className="text-sm text-gray-600 dark:text-gray-400">
                 <span className="font-medium">{deleteConfirm.invoice_number}</span> - ${deleteConfirm.total_amount.toFixed(2)}
               </p>
-              <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-2">
                 {deleteConfirm.status === 'sent' || deleteConfirm.status === 'paid' || deleteConfirm.status === 'overdue' ? (
                   <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
-                    <Send className="w-3 h-3" /> Marked as sent
+                    <Send className="w-3 h-3" /> Sent to client
                   </span>
                 ) : (
                   <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400">
@@ -783,13 +720,8 @@ export function InvoicesPage() {
                   </span>
                 )}
               </div>
-              {invoiceFlags[deleteConfirm.id]?.sentTo && (
-                <p className="text-xs text-gray-500 dark:text-gray-400">
-                  Recipient on record: <strong>{invoiceFlags[deleteConfirm.id].sentTo}</strong>
-                </p>
-              )}
               <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-                This will permanently delete this invoice. Linked work hours will return to "Confirmed" (not invoiced). A record will be kept in your history.
+                This will permanently delete this invoice. Linked work hours will return to "not invoiced". A record will be kept in your history.
               </p>
             </div>
             <div className="flex gap-3">
@@ -876,9 +808,9 @@ export function InvoicesPage() {
                   <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
                     {(inv as any).clients?.name} • {format(new Date(inv.invoice_date + 'T00:00'), 'MMM d, yyyy')}
                   </p>
-                  {/* Downloaded/Sent flags with recipient */}
+                  {/* Downloaded/Sent flags */}
                   {flags && (flags.downloaded || flags.sent) && (
-                    <div className="flex flex-wrap gap-1.5 mt-1">
+                    <div className="flex gap-1.5 mt-1">
                       {flags.downloaded && (
                         <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
                           <CheckCircle className="w-3 h-3" /> Downloaded
@@ -886,10 +818,7 @@ export function InvoicesPage() {
                       )}
                       {flags.sent && (
                         <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-blue-700 dark:text-blue-400">
-                          <CheckCircle className="w-3 h-3" /> Marked sent
-                          {flags.sentTo && (
-                            <span className="text-gray-400 dark:text-gray-500 font-normal ml-1">→ {flags.sentTo}</span>
-                          )}
+                          <CheckCircle className="w-3 h-3" /> Sent
                         </span>
                       )}
                     </div>
