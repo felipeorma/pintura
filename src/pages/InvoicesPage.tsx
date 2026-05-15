@@ -671,11 +671,13 @@ export function InvoicesPage() {
 
               <div className="flex gap-3 pt-2">
                 <button onClick={() => setPreviewInvoice(null)} className="flex-1 py-2.5 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 font-medium rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
-                  Cancel
+                  Close
                 </button>
-                <button onClick={confirmSend} className="flex-1 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2">
-                  <Send className="w-4 h-4" /> Confirm & Mark Sent
-                </button>
+                {previewInvoice.status === 'draft' && (
+                  <button onClick={confirmSend} className="flex-1 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2">
+                    <Send className="w-4 h-4" /> Confirm & Mark Sent
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -817,14 +819,12 @@ export function InvoicesPage() {
                 </div>
               </div>
               <div className="mt-2 flex gap-2 flex-wrap">
+                <button onClick={() => openPreview(inv)} className="text-xs px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded flex items-center gap-1 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+                  <Eye className="w-3 h-3" /> View
+                </button>
                 <button onClick={() => downloadPdf(inv)} className="text-xs px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded flex items-center gap-1 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
                   <Download className="w-3 h-3" /> PDF
                 </button>
-                {inv.status === 'draft' && (
-                  <button onClick={() => openPreview(inv)} className="text-xs px-2 py-1 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 rounded flex items-center gap-1 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors">
-                    <Eye className="w-3 h-3" /> Preview & Send
-                  </button>
-                )}
                 <button onClick={() => startEdit(inv)} className="text-xs px-2 py-1 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 rounded flex items-center gap-1 hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors">
                   <Pencil className="w-3 h-3" /> Edit
                 </button>
