@@ -636,8 +636,9 @@ export function InvoicesPage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-gray-50 dark:bg-gray-700/50 border-b border-gray-200 dark:border-gray-700">
+                      <th className="text-left px-3 py-2 text-xs font-semibold text-gray-500 dark:text-gray-400">Date</th>
                       <th className="text-left px-3 py-2 text-xs font-semibold text-gray-500 dark:text-gray-400">Description</th>
-                      <th className="text-center px-3 py-2 text-xs font-semibold text-gray-500 dark:text-gray-400">Qty</th>
+                      <th className="text-center px-3 py-2 text-xs font-semibold text-gray-500 dark:text-gray-400">Hrs</th>
                       <th className="text-right px-3 py-2 text-xs font-semibold text-gray-500 dark:text-gray-400">Rate</th>
                       <th className="text-right px-3 py-2 text-xs font-semibold text-gray-500 dark:text-gray-400">Amount</th>
                     </tr>
@@ -645,6 +646,9 @@ export function InvoicesPage() {
                   <tbody>
                     {previewItems.map((item, i) => (
                       <tr key={i} className="border-b border-gray-100 dark:border-gray-700/50 last:border-0">
+                        <td className="px-3 py-2 text-gray-600 dark:text-gray-400 whitespace-nowrap text-xs">
+                          {item.work_date ? format(new Date(item.work_date + 'T00:00'), 'EEE, MMM d') : '-'}
+                        </td>
                         <td className="px-3 py-2 text-gray-900 dark:text-white">{item.description || 'Service'}</td>
                         <td className="px-3 py-2 text-center text-gray-600 dark:text-gray-400">{item.hours?.toFixed(1) || '-'}</td>
                         <td className="px-3 py-2 text-right text-gray-600 dark:text-gray-400">{item.rate ? `$${item.rate.toFixed(2)}` : '-'}</td>

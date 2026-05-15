@@ -31,13 +31,20 @@ export function generateInvoicePdf(
     return date.toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' });
   };
 
+  const formatItemDate = (d: string) => {
+    const date = new Date(d + 'T00:00');
+    return date.toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' });
+  };
+
   const formatCurrency = (n: number) => `$${n.toFixed(2)}`;
 
   const itemRows = items.map(item => `
     <tr>
+      <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 12px; color: #6b7280; white-space: nowrap;">
+        ${item.work_date ? formatItemDate(item.work_date) : '-'}
+      </td>
       <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px; color: #374151;">
         ${item.description || 'Service'}
-        ${item.work_date ? `<br><span style="color: #6b7280; font-size: 11px;">${formatDate(item.work_date)}</span>` : ''}
       </td>
       <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px; color: #374151; text-align: center;">
         ${item.hours != null ? item.hours.toFixed(1) : '-'}
@@ -78,7 +85,6 @@ export function generateInvoicePdf(
         ${profile.city ? `<p style="font-size: 13px; color: #6b7280;">${profile.city}${profile.province ? ', ' + profile.province : ''}</p>` : ''}
         ${profile.phone ? `<p style="font-size: 13px; color: #6b7280;">${profile.phone}</p>` : ''}
         ${profile.email ? `<p style="font-size: 13px; color: #6b7280;">${profile.email}</p>` : ''}
-        ${profile.gst_enabled && profile.gst_number ? `<p style="font-size: 13px; color: #6b7280; margin-top: 4px;">GST #: ${profile.gst_number}</p>` : ''}
       </div>
     </div>
 
@@ -109,8 +115,9 @@ export function generateInvoicePdf(
     <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px;">
       <thead>
         <tr style="border-bottom: 2px solid #0d9488;">
+          <th style="padding: 10px 12px; text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #6b7280;">Date</th>
           <th style="padding: 10px 12px; text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #6b7280;">Description</th>
-          <th style="padding: 10px 12px; text-align: center; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #6b7280;">Qty/Hrs</th>
+          <th style="padding: 10px 12px; text-align: center; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #6b7280;">Hrs</th>
           <th style="padding: 10px 12px; text-align: right; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #6b7280;">Rate</th>
           <th style="padding: 10px 12px; text-align: right; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #6b7280;">Amount</th>
         </tr>
