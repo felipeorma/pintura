@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { StatusBadge } from '../components/StatusBadge';
 import type { Invoice, Client, WorkHour, Profile, InvoiceItem } from '../lib/types';
-import { Plus, X, FileText, Download, Trash2, Pencil, Eye, Send } from 'lucide-react';
+import { Plus, X, FileText, Download, Trash2, Pencil, Eye, Send, History, CheckCircle } from 'lucide-react';
 import { format } from 'date-fns';
 import { generateInvoicePdf } from '../lib/invoicePdf';
 
@@ -13,6 +13,15 @@ interface ServiceItem {
   description: string;
   quantity: number;
   rate: number;
+}
+
+interface InvoiceHistoryEntry {
+  id: string;
+  invoice_id: string | null;
+  invoice_number: string;
+  action: string;
+  note: string | null;
+  created_at: string;
 }
 
 export function InvoicesPage() {
@@ -45,21 +54,39 @@ export function InvoicesPage() {
   const [previewClient, setPreviewClient] = useState<Client | null>(null);
 
   // Delete confirm
-  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<Invoice | null>(null);
+
+  // History
+  const [history, setHistory] = useState<InvoiceHistoryEntry[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
+  const [invoiceFlags, setInvoiceFlags] = useState<Record<string, { downloaded: boolean; sent: boolean }>>({});
 
   useEffect(() => {
     if (user) loadData();
   }, [user]);
 
   async function loadData() {
-    const [invRes, clientsRes, profileRes] = await Promise.all([
+    const [invRes, clientsRes, profileRes, historyRes] = await Promise.all([
       supabase.from('invoices').select('*, clients(name)').eq('user_id', user!.id).order('invoice_date', { ascending: false }),
       supabase.from('clients').select('*').eq('user_id', user!.id).eq('active', true).order('name'),
       supabase.from('profiles').select('*').eq('id', user!.id).maybeSingle(),
+      supabase.from('invoice_history').select('*').eq('user_id', user!.id).order('created_at', { ascending: false }),
     ]);
     setInvoices(invRes.data || []);
     setClients(clientsRes.data || []);
     setProfile(profileRes.data);
+    setHistory(historyRes.data || []);
+
+    // Build flags per invoice
+    const flags: Record<string, { downloaded: boolean; sent: boolean }> = {};
+    (historyRes.data || []).forEach((h: InvoiceHistoryEntry) => {
+      if (!h.invoice_id) return;
+      if (!flags[h.invoice_id]) flags[h.invoice_id] = { downloaded: false, sent: false };
+      if (h.action === 'downloaded') flags[h.invoice_id].downloaded = true;
+      if (h.action === 'sent') flags[h.invoice_id].sent = true;
+    });
+    setInvoiceFlags(flags);
+
     setLoading(false);
   }
 
@@ -74,6 +101,16 @@ export function InvoicesPage() {
   function getNextInvoiceNumber() {
     const invoiceCount = invoices.length + 1;
     return `INV-${format(new Date(), 'yyyyMM')}-${String(invoiceCount).padStart(3, '0')}`;
+  }
+
+  async function logHistory(invoiceId: string | null, invoiceNumber: string, action: string, note?: string) {
+    await supabase.from('invoice_history').insert({
+      user_id: user!.id,
+      invoice_id: invoiceId,
+      invoice_number: invoiceNumber,
+      action,
+      note: note || null,
+    });
   }
 
   async function createInvoiceFromHours() {
@@ -172,16 +209,21 @@ export function InvoicesPage() {
     setInvoiceMode('hours');
   }
 
-  async function deleteInvoice(id: string) {
-    const invoice = invoices.find(i => i.id === id);
+  async function deleteInvoice(inv: Invoice) {
+    // Log history with status info before deleting
+    const statusLabel = inv.status === 'sent' || inv.status === 'paid' ? 'Sent' : 'Not sent';
+    const wasDownloaded = invoiceFlags[inv.id]?.downloaded;
+    const note = `Status at deletion: ${statusLabel}${wasDownloaded ? ', Downloaded' : ''}`;
+    await logHistory(null, inv.invoice_number, 'deleted', note);
+
     // Restore work_hours status if they were linked
-    const { data: items } = await supabase.from('invoice_items').select('work_hour_id').eq('invoice_id', id);
+    const { data: items } = await supabase.from('invoice_items').select('work_hour_id').eq('invoice_id', inv.id);
     const workHourIds = (items || []).map(i => i.work_hour_id).filter(Boolean);
     if (workHourIds.length > 0) {
       await supabase.from('work_hours').update({ status: 'not_invoiced' }).in('id', workHourIds);
     }
-    await supabase.from('invoice_items').delete().eq('invoice_id', id);
-    await supabase.from('invoices').delete().eq('id', id);
+    await supabase.from('invoice_items').delete().eq('invoice_id', inv.id);
+    await supabase.from('invoices').delete().eq('id', inv.id);
     setDeleteConfirm(null);
     loadData();
   }
@@ -215,12 +257,11 @@ export function InvoicesPage() {
       subtotal,
       gst_amount: gstAmount,
       total_amount: totalAmount,
-      balance_due: totalAmount,
+      balance_due: totalAmount - (editingInvoice.amount_paid || 0),
       notes: editNotes || null,
       updated_at: new Date().toISOString(),
     }).eq('id', editingInvoice.id);
 
-    // Replace items
     await supabase.from('invoice_items').delete().eq('invoice_id', editingInvoice.id);
     const newItems = validItems.map(i => ({
       user_id: user!.id,
@@ -237,6 +278,7 @@ export function InvoicesPage() {
     }));
     await supabase.from('invoice_items').insert(newItems);
 
+    await logHistory(editingInvoice.id, editingInvoice.invoice_number, 'edited');
     setEditingInvoice(null);
     loadData();
   }
@@ -254,6 +296,7 @@ export function InvoicesPage() {
   async function confirmSend() {
     if (!previewInvoice) return;
     await supabase.from('invoices').update({ status: 'sent', updated_at: new Date().toISOString() }).eq('id', previewInvoice.id);
+    await logHistory(previewInvoice.id, previewInvoice.invoice_number, 'sent');
     setPreviewInvoice(null);
     loadData();
   }
@@ -302,6 +345,8 @@ export function InvoicesPage() {
     ]);
     if (!profile || !clientRes.data) return;
     generateInvoicePdf(inv, itemsRes.data || [], profile, clientRes.data);
+    await logHistory(inv.id, inv.invoice_number, 'downloaded');
+    loadData();
   }
 
   const filtered = filterStatus === 'all' ? invoices : invoices.filter(i => i.status === filterStatus);
@@ -318,9 +363,14 @@ export function InvoicesPage() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Invoices</h1>
-        <button onClick={() => setShowCreate(true)} className="flex items-center gap-1.5 px-3 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium rounded-lg transition-colors">
-          <Plus className="w-4 h-4" /> Create Invoice
-        </button>
+        <div className="flex gap-2">
+          <button onClick={() => setShowHistory(true)} className="flex items-center gap-1.5 px-3 py-2 border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-400 text-sm font-medium rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
+            <History className="w-4 h-4" /> History
+          </button>
+          <button onClick={() => setShowCreate(true)} className="flex items-center gap-1.5 px-3 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium rounded-lg transition-colors">
+            <Plus className="w-4 h-4" /> Create
+          </button>
+        </div>
       </div>
 
       <div className="flex gap-2 mb-4 overflow-x-auto">
@@ -554,7 +604,6 @@ export function InvoicesPage() {
               <button onClick={() => setPreviewInvoice(null)} className="p-1 text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
             </div>
             <div className="p-4 space-y-4">
-              {/* Header info */}
               <div className="flex justify-between items-start">
                 <div>
                   <p className="text-lg font-bold text-teal-700 dark:text-teal-400">{previewInvoice.invoice_number}</p>
@@ -569,7 +618,6 @@ export function InvoicesPage() {
                 </div>
               </div>
 
-              {/* Bill to */}
               <div className="bg-gray-50 dark:bg-gray-700/30 rounded-lg p-3">
                 <p className="text-xs font-semibold uppercase text-gray-400 dark:text-gray-500 mb-1">Bill To</p>
                 <p className="text-sm font-medium text-gray-900 dark:text-white">{previewClient.name}</p>
@@ -577,7 +625,6 @@ export function InvoicesPage() {
                 {previewClient.email && <p className="text-xs text-gray-500">{previewClient.email}</p>}
               </div>
 
-              {/* Items */}
               <div className="border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
                 <table className="w-full text-sm">
                   <thead>
@@ -601,7 +648,6 @@ export function InvoicesPage() {
                 </table>
               </div>
 
-              {/* Totals */}
               <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 space-y-1">
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-600 dark:text-gray-400">Subtotal</span>
@@ -620,12 +666,9 @@ export function InvoicesPage() {
               </div>
 
               {previewInvoice.notes && (
-                <div className="text-xs text-gray-500 dark:text-gray-400 italic">
-                  {previewInvoice.notes}
-                </div>
+                <div className="text-xs text-gray-500 dark:text-gray-400 italic">{previewInvoice.notes}</div>
               )}
 
-              {/* Action buttons */}
               <div className="flex gap-3 pt-2">
                 <button onClick={() => setPreviewInvoice(null)} className="flex-1 py-2.5 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 font-medium rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
                   Cancel
@@ -644,9 +687,30 @@ export function InvoicesPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
           <div className="bg-white dark:bg-gray-800 rounded-xl w-full max-w-sm shadow-xl p-6">
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Delete Invoice?</h3>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-              This will permanently delete this invoice and restore any linked work hours to "not invoiced" status. This cannot be undone.
-            </p>
+            <div className="mb-4 space-y-2">
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                <span className="font-medium">{deleteConfirm.invoice_number}</span> - ${deleteConfirm.total_amount.toFixed(2)}
+              </p>
+              <div className="flex items-center gap-2">
+                {deleteConfirm.status === 'sent' || deleteConfirm.status === 'paid' || deleteConfirm.status === 'overdue' ? (
+                  <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">
+                    <Send className="w-3 h-3" /> Sent to client
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400">
+                    Not sent
+                  </span>
+                )}
+                {invoiceFlags[deleteConfirm.id]?.downloaded && (
+                  <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-full bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300">
+                    <Download className="w-3 h-3" /> Downloaded
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+                This will permanently delete this invoice. Linked work hours will return to "not invoiced". A record will be kept in your history.
+              </p>
+            </div>
             <div className="flex gap-3">
               <button onClick={() => setDeleteConfirm(null)} className="flex-1 py-2.5 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 font-medium rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
                 Cancel
@@ -659,6 +723,58 @@ export function InvoicesPage() {
         </div>
       )}
 
+      {/* History Modal */}
+      {showHistory && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-white dark:bg-gray-800 rounded-xl w-full max-w-lg max-h-[90vh] overflow-y-auto shadow-xl">
+            <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Invoice History</h2>
+              <button onClick={() => setShowHistory(false)} className="p-1 text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+            </div>
+            <div className="p-4">
+              {history.length === 0 ? (
+                <p className="text-sm text-gray-400 dark:text-gray-500 text-center py-8">No history yet</p>
+              ) : (
+                <div className="space-y-2">
+                  {history.map(h => (
+                    <div key={h.id} className="flex items-start gap-3 p-3 rounded-lg bg-gray-50 dark:bg-gray-700/30">
+                      <div className={`flex-shrink-0 mt-0.5 w-7 h-7 rounded-full flex items-center justify-center ${
+                        h.action === 'downloaded' ? 'bg-emerald-100 dark:bg-emerald-900/30' :
+                        h.action === 'sent' ? 'bg-blue-100 dark:bg-blue-900/30' :
+                        h.action === 'deleted' ? 'bg-red-100 dark:bg-red-900/30' :
+                        'bg-amber-100 dark:bg-amber-900/30'
+                      }`}>
+                        {h.action === 'downloaded' && <Download className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />}
+                        {h.action === 'sent' && <Send className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />}
+                        {h.action === 'deleted' && <Trash2 className="w-3.5 h-3.5 text-red-600 dark:text-red-400" />}
+                        {h.action === 'edited' && <Pencil className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium text-gray-900 dark:text-white">{h.invoice_number}</span>
+                          <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${
+                            h.action === 'downloaded' ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300' :
+                            h.action === 'sent' ? 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' :
+                            h.action === 'deleted' ? 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300' :
+                            'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
+                          }`}>
+                            {h.action}
+                          </span>
+                        </div>
+                        {h.note && <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{h.note}</p>}
+                        <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
+                          {format(new Date(h.created_at), 'MMM d, yyyy - h:mm a')}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Invoice list */}
       <div className="space-y-2">
         {filtered.length === 0 ? (
@@ -666,46 +782,62 @@ export function InvoicesPage() {
             <FileText className="w-10 h-10 mx-auto mb-2 opacity-50" />
             <p>No invoices yet</p>
           </div>
-        ) : filtered.map(inv => (
-          <div key={inv.id} className="bg-white dark:bg-gray-800 rounded-lg border border-gray-100 dark:border-gray-700 p-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-gray-900 dark:text-white">{inv.invoice_number}</span>
-                  <StatusBadge status={inv.status} />
+        ) : filtered.map(inv => {
+          const flags = invoiceFlags[inv.id];
+          return (
+            <div key={inv.id} className="bg-white dark:bg-gray-800 rounded-lg border border-gray-100 dark:border-gray-700 p-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-gray-900 dark:text-white">{inv.invoice_number}</span>
+                    <StatusBadge status={inv.status} />
+                  </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    {(inv as any).clients?.name} • {format(new Date(inv.invoice_date + 'T00:00'), 'MMM d, yyyy')}
+                  </p>
+                  {/* Downloaded/Sent flags */}
+                  {flags && (flags.downloaded || flags.sent) && (
+                    <div className="flex gap-1.5 mt-1">
+                      {flags.downloaded && (
+                        <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
+                          <CheckCircle className="w-3 h-3" /> Downloaded
+                        </span>
+                      )}
+                      {flags.sent && (
+                        <span className="inline-flex items-center gap-0.5 text-[10px] font-medium text-blue-700 dark:text-blue-400">
+                          <CheckCircle className="w-3 h-3" /> Sent
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                  {(inv as any).clients?.name} • {format(new Date(inv.invoice_date + 'T00:00'), 'MMM d, yyyy')}
-                </p>
+                <div className="text-right">
+                  <p className="text-sm font-semibold text-gray-900 dark:text-white">${inv.total_amount.toFixed(2)}</p>
+                  {inv.balance_due > 0 && inv.status !== 'draft' && <p className="text-xs text-red-500">Due: ${inv.balance_due.toFixed(2)}</p>}
+                </div>
               </div>
-              <div className="text-right">
-                <p className="text-sm font-semibold text-gray-900 dark:text-white">${inv.total_amount.toFixed(2)}</p>
-                {inv.balance_due > 0 && inv.status !== 'draft' && <p className="text-xs text-red-500">Due: ${inv.balance_due.toFixed(2)}</p>}
-              </div>
-            </div>
-            <div className="mt-2 flex gap-2 flex-wrap">
-              <button onClick={() => downloadPdf(inv)} className="text-xs px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded flex items-center gap-1 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
-                <Download className="w-3 h-3" /> PDF
-              </button>
-              {inv.status === 'draft' && (
-                <>
+              <div className="mt-2 flex gap-2 flex-wrap">
+                <button onClick={() => downloadPdf(inv)} className="text-xs px-2 py-1 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded flex items-center gap-1 hover:bg-gray-200 dark:hover:bg-gray-600 transition-colors">
+                  <Download className="w-3 h-3" /> PDF
+                </button>
+                {inv.status === 'draft' && (
                   <button onClick={() => openPreview(inv)} className="text-xs px-2 py-1 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 rounded flex items-center gap-1 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors">
                     <Eye className="w-3 h-3" /> Preview & Send
                   </button>
-                  <button onClick={() => startEdit(inv)} className="text-xs px-2 py-1 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 rounded flex items-center gap-1 hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors">
-                    <Pencil className="w-3 h-3" /> Edit
-                  </button>
-                  <button onClick={() => setDeleteConfirm(inv.id)} className="text-xs px-2 py-1 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 rounded flex items-center gap-1 hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors">
-                    <Trash2 className="w-3 h-3" /> Delete
-                  </button>
-                </>
-              )}
-              {(inv.status === 'sent' || inv.status === 'overdue') && (
-                <button onClick={() => updateStatus(inv.id, 'paid')} className="text-xs px-2 py-1 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 rounded">Mark Paid</button>
-              )}
+                )}
+                <button onClick={() => startEdit(inv)} className="text-xs px-2 py-1 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300 rounded flex items-center gap-1 hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors">
+                  <Pencil className="w-3 h-3" /> Edit
+                </button>
+                <button onClick={() => setDeleteConfirm(inv)} className="text-xs px-2 py-1 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 rounded flex items-center gap-1 hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors">
+                  <Trash2 className="w-3 h-3" /> Delete
+                </button>
+                {(inv.status === 'sent' || inv.status === 'overdue') && (
+                  <button onClick={() => updateStatus(inv.id, 'paid')} className="text-xs px-2 py-1 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 rounded">Mark Paid</button>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
