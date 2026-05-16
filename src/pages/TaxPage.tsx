@@ -1,9 +1,16 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { Profile } from '../lib/types';
 import { calculatePersonalTax, calculateGst, mapCategoryToT2125Line, isInstalmentRequired, calculateInstalmentAmount } from '../lib/taxCalculator';
-import { Calculator, TrendingUp, Calendar, Lightbulb, Download, ChevronDown, ChevronRight, Check, AlertTriangle } from 'lucide-react';
+import { marginalRate as getMarginalRate, taxSavingsFromDeduction, bracketHeadroom } from '../lib/taxOptimizer';
+import { TipCard } from '../components/TipCard';
+import {
+  Calculator, TrendingUp, Calendar, Lightbulb, Download, ChevronDown, ChevronRight, Check, AlertTriangle,
+  Home, Car, Wrench, ShoppingCart, Users, Utensils, Phone, Receipt, PiggyBank, BarChart3,
+  Building2, ShieldCheck, GraduationCap, ClipboardCheck, Wallet
+} from 'lucide-react';
 import { format } from 'date-fns';
 
 type Tab = 'summary' | 'personal' | 'instalments' | 'tips' | 'export';
@@ -36,7 +43,23 @@ export function TaxPage() {
   const [instalments, setInstalments] = useState<Instalment[]>([]);
   const [otherIncome, setOtherIncome] = useState(0);
   const [rrspDeduction, setRrspDeduction] = useState(0);
-  const [expandedTips, setExpandedTips] = useState<Set<number>>(new Set());
+  const [tipsData, setTipsData] = useState<{
+    trackedKm: number;
+    workDays: number;
+    tripDays: number;
+    avgKmPerTrip: number;
+    mealExpenses: number;
+    toolExpenses: number;
+    profDevExpenses: number;
+    phoneExpenses: number;
+    internetExpenses: number;
+    homeOfficeExpenses: number;
+    wcbPaid: number;
+  }>({ trackedKm: 0, workDays: 0, tripDays: 0, avgKmPerTrip: 0, mealExpenses: 0, toolExpenses: 0, profDevExpenses: 0, phoneExpenses: 0, internetExpenses: 0, homeOfficeExpenses: 0, wcbPaid: 0 });
+  const [checklist, setChecklist] = useState<Record<string, boolean>>({});
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
+  const [rrspPlanned, setRrspPlanned] = useState(0);
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (user) loadData();
@@ -88,6 +111,56 @@ export function TaxPage() {
 
     setYearData({ revenue, gstCollected, gstPaid, expensesByCategory, totalExpenses });
     setInstalments(instRes.data || []);
+
+    const [mileageRes, workHoursRes, checklistRes] = await Promise.all([
+      supabase.from('mileage_logs').select('km_driven, log_date').eq('user_id', user!.id).gte('log_date', yearStart).lte('log_date', yearEnd),
+      supabase.from('work_hours').select('work_date').eq('user_id', user!.id).gte('work_date', yearStart).lte('work_date', yearEnd),
+      supabase.from('year_end_checklist').select('item_key, checked').eq('user_id', user!.id).eq('year', selectedYear),
+    ]);
+
+    const mileageLogs = mileageRes.data || [];
+    const trackedKm = mileageLogs.reduce((s, l) => s + (l.km_driven || 0), 0);
+    const tripDates = new Set(mileageLogs.map(l => l.log_date));
+    const avgKmPerTrip = mileageLogs.length > 0 ? trackedKm / mileageLogs.length : 25;
+
+    const workDates = new Set((workHoursRes.data || []).map(w => w.work_date));
+    const workDays = workDates.size;
+    const tripDays = tripDates.size;
+
+    let mealExp = 0, toolExp = 0, profDevExp = 0, phoneExp = 0, internetExp = 0, homeExp = 0;
+    expenses.forEach(exp => {
+      const cat = exp.category || '';
+      const amt = (exp.subtotal_before_gst || 0) * ((exp.business_use_percent || 100) / 100);
+      if (cat === 'Meals') mealExp += amt * 0.5;
+      if (cat === 'Tools and equipment') toolExp += amt;
+      if (cat === 'Software / apps' || cat === 'Accounting / tax preparation') profDevExp += amt;
+      if (cat === 'Phone') phoneExp += (exp.subtotal_before_gst || 0);
+      if (cat === 'Internet') internetExp += (exp.subtotal_before_gst || 0);
+      if (cat === 'Home office') homeExp += amt;
+    });
+
+    setTipsData({
+      trackedKm,
+      workDays,
+      tripDays,
+      avgKmPerTrip,
+      mealExpenses: mealExp,
+      toolExpenses: toolExp,
+      profDevExpenses: profDevExp,
+      phoneExpenses: phoneExp,
+      internetExpenses: internetExp,
+      homeOfficeExpenses: homeExp,
+      wcbPaid: wcbDeductiblePremiums,
+    });
+
+    const checklistMap: Record<string, boolean> = {};
+    (checklistRes.data || []).forEach(c => { checklistMap[c.item_key] = c.checked; });
+    setChecklist(checklistMap);
+
+    if (pRes.data?.rrsp_planned_contribution) {
+      setRrspPlanned(pRes.data.rrsp_planned_contribution);
+    }
+
     setLoading(false);
   }
 
@@ -120,12 +193,29 @@ export function TaxPage() {
     { key: 'export', label: 'Export', icon: Download },
   ];
 
-  function toggleTip(idx: number) {
-    setExpandedTips(prev => {
+  function toggleSection(key: string) {
+    setCollapsedSections(prev => {
       const next = new Set(prev);
-      if (next.has(idx)) next.delete(idx); else next.add(idx);
+      if (next.has(key)) next.delete(key); else next.add(key);
       return next;
     });
+  }
+
+  async function toggleChecklistItem(key: string) {
+    const newChecked = !checklist[key];
+    setChecklist(prev => ({ ...prev, [key]: newChecked }));
+    await supabase.from('year_end_checklist').upsert({
+      user_id: user!.id,
+      year: selectedYear,
+      item_key: key,
+      checked: newChecked,
+      checked_at: newChecked ? new Date().toISOString() : null,
+    }, { onConflict: 'user_id,year,item_key' });
+  }
+
+  async function saveRrspPlanned(val: number) {
+    setRrspPlanned(val);
+    await supabase.from('profiles').update({ rrsp_planned_contribution: val }).eq('id', user!.id);
   }
 
   function formatMoney(n: number) {
@@ -367,146 +457,642 @@ export function TaxPage() {
   }
 
   function renderTips() {
-    const tips = getTips();
+    const mRate = getMarginalRate(netIncome, selectedYear);
+    const bracket = bracketHeadroom(netIncome, selectedYear);
+    const rrspRoom = profile?.rrsp_room_remaining || 0;
+    const tfsaRoom = profile?.tfsa_room_remaining || 0;
+    const homePercent = profile?.home_office_percent || 0;
+    const phonePercent = profile?.phone_business_use_percent || 50;
+    const internetPercent = profile?.internet_business_use_percent || 25;
+    const wcbPremium = profile?.wcb_annual_premium || 0;
+    const quarterlyAmount = taxBreakdown.totalTax / 4;
+
+    const missedKmDays = Math.max(0, tipsData.workDays - tipsData.tripDays);
+    const estMissedKm = missedKmDays * tipsData.avgKmPerTrip * 0.6;
+    const perKmValue = 0.72 * mRate;
+
+    const phoneOptimal = 85;
+    const internetOptimal = 60;
+    const phoneExtra = Math.max(0, ((phoneOptimal - phonePercent) / 100) * (tipsData.phoneExpenses > 0 ? tipsData.phoneExpenses * 12 / Math.max(1, new Date().getMonth() + 1) : 1200));
+    const internetExtra = Math.max(0, ((internetOptimal - internetPercent) / 100) * (tipsData.internetExpenses > 0 ? tipsData.internetExpenses * 12 / Math.max(1, new Date().getMonth() + 1) : 960));
+    const phoneInternetSavings = taxSavingsFromDeduction(phoneExtra + internetExtra, netIncome, selectedYear);
+
+    const homeOptimalPercent = 15;
+    const homeExtraDeduction = homePercent < homeOptimalPercent ? ((homeOptimalPercent - homePercent) / 100) * 18000 : 0;
+    const homeExtraSavings = taxSavingsFromDeduction(homeExtraDeduction, netIncome, selectedYear);
+
+    const rrspSavings = taxSavingsFromDeduction(rrspRoom, netIncome, selectedYear);
+    const vehicleSavings = estMissedKm * perKmValue;
+    const mealMissedEstimate = 600;
+    const mealSavings = taxSavingsFromDeduction(mealMissedEstimate * 0.5, netIncome, selectedYear);
+    const wcbSavings = taxSavingsFromDeduction(tipsData.wcbPaid || wcbPremium, netIncome, selectedYear);
+
     const now = new Date();
-    const showChecklist = now.getMonth() >= 10;
+    const isYearEnd = now.getMonth() >= 9;
+    const isChecklist = now.getMonth() >= 10 || now.getMonth() === 0;
+
+    type CardDef = {
+      id: string;
+      section: string;
+      savings: number;
+      show: boolean;
+      render: () => React.ReactNode;
+    };
+
+    const cards: CardDef[] = [
+      {
+        id: 'rrsp',
+        section: 'quick',
+        savings: rrspSavings,
+        show: true,
+        render: () => (
+          <TipCard
+            key="rrsp"
+            icon={PiggyBank}
+            title={`RRSP Room: ${formatMoney(rrspRoom)} unused`}
+            currentClaim={formatMoney(rrspPlanned)}
+            optimalClaim={formatMoney(rrspRoom)}
+            extraSavings={rrspSavings}
+            missingData={!profile?.rrsp_room_remaining ? 'Set your RRSP room in Settings > Tax Settings (from your latest CRA Notice of Assessment) to see personalized savings.' : undefined}
+            body={`Contributing your full ${formatMoney(rrspRoom)} of RRSP room reduces your ${selectedYear} taxable income by the same amount. At your marginal rate of ${(mRate * 100).toFixed(1)}%, that's ${formatMoney(rrspSavings)} back in your pocket. Deadline: March 2, ${selectedYear + 1}.
+
+EXTRA STRATEGY: ${bracket.deductionToDropBracket > 0 && bracket.deductionToDropBracket < rrspRoom ? `Even contributing ${formatMoney(bracket.deductionToDropBracket)} would drop you from the ${bracket.currentBracket}% combined bracket — high-value dollars.` : `Your full contribution stays within your current ${bracket.currentBracket}% bracket — every dollar saves at the same rate.`}
+
+If you can't afford the full amount, even $5,000 saves you ${formatMoney(taxSavingsFromDeduction(5000, netIncome, selectedYear))}.`}
+            legalBasis="ITA §146 / T1 line 20800"
+            action={
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">RRSP planned:</label>
+                <div className="flex items-center gap-1">
+                  <span className="text-sm text-gray-500">$</span>
+                  <input
+                    type="number"
+                    value={rrspPlanned || ''}
+                    onChange={e => saveRrspPlanned(parseFloat(e.target.value) || 0)}
+                    placeholder="0"
+                    min={0}
+                    className="w-28 px-2 py-1.5 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm"
+                  />
+                </div>
+              </div>
+            }
+            defaultExpanded={rrspRoom > 0}
+          />
+        ),
+      },
+      {
+        id: 'home-office',
+        section: 'quick',
+        savings: homeExtraSavings,
+        show: true,
+        render: () => (
+          <TipCard
+            key="home-office"
+            icon={Home}
+            title="Home Office — Underclaiming Detector"
+            currentClaim={`${homePercent}%`}
+            optimalClaim={homePercent < homeOptimalPercent ? `${homeOptimalPercent}%` : undefined}
+            extraSavings={homeExtraSavings}
+            body={`You're claiming only ${homePercent}%. For a dedicated home office (room used ONLY for business), painters typically claim 10-20%. Measure: business_sqft / total_home_sqft.
+
+Current deduction: ${formatMoney(tipsData.homeOfficeExpenses)}. Bumping to ${homeOptimalPercent}% would add ~${formatMoney(homeExtraDeduction)} in deductions, saving ${formatMoney(homeExtraSavings)} in tax at your ${(mRate * 100).toFixed(0)}% marginal rate.
+
+ELIGIBLE EXPENSES (per T2125 Part 7):
+- Utilities (heat, electricity, water)
+- Home internet
+- Property tax
+- Mortgage INTEREST (not principal!)
+- Home insurance
+- Maintenance & repairs
+- Rent (if renting)
+
+LIMIT: Cannot create or increase a business loss. Excess carries forward to next year.`}
+            legalBasis="T2125 Part 7 / ITA §18(12)"
+            action={
+              <button onClick={() => navigate('/settings')} className="px-3 py-1.5 text-xs font-medium bg-teal-600 hover:bg-teal-700 text-white rounded-lg transition-colors">
+                Update home office % in Settings
+              </button>
+            }
+            defaultExpanded={homePercent < 10 && homeExtraSavings > 200}
+          />
+        ),
+      },
+      {
+        id: 'vehicle',
+        section: 'quick',
+        savings: vehicleSavings,
+        show: true,
+        render: () => (
+          <TipCard
+            key="vehicle"
+            icon={Car}
+            title="Vehicle — Untracked KMs Cost Detector"
+            currentClaim={`${tipsData.trackedKm.toLocaleString()} km logged`}
+            optimalClaim={missedKmDays > 0 ? `~${Math.round(estMissedKm).toLocaleString()} km missed` : undefined}
+            extraSavings={vehicleSavings}
+            body={`You logged ${tipsData.trackedKm.toLocaleString()} business km this year across ${tipsData.tripDays} trip days. You worked ${tipsData.workDays} days total — that's ${missedKmDays} workdays with NO trip logged.
+
+Estimated missed km: ~${Math.round(estMissedKm).toLocaleString()} km (at avg ${Math.round(tipsData.avgKmPerTrip)} km/trip × 60%). At ~$${perKmValue.toFixed(2)}/km in tax savings, you're leaving ${formatMoney(vehicleSavings)} on the table.
+
+UNTRACKED TRIPS PAINTERS COMMONLY MISS:
+- Home Depot / Rona / Cloverdale Paint runs
+- Client estimate visits (round trip)
+- Bank, post office, supplier pickup
+- Trips to job site for inspection without logging hours
+- Driving to pick up subs or materials mid-job
+
+REQUIREMENT: CRA wants a logbook with date, start/end km, purpose for each business trip. The app does this automatically.`}
+            legalBasis="T2125 Chart A / Motor Vehicle Expenses"
+            action={
+              <button onClick={() => navigate('/vehicle')} className="px-3 py-1.5 text-xs font-medium bg-teal-600 hover:bg-teal-700 text-white rounded-lg transition-colors">
+                Log a missed trip now
+              </button>
+            }
+            defaultExpanded={vehicleSavings > 200}
+          />
+        ),
+      },
+      {
+        id: 'phone-internet',
+        section: 'quick',
+        savings: phoneInternetSavings,
+        show: true,
+        render: () => (
+          <TipCard
+            key="phone-internet"
+            icon={Phone}
+            title="Phone & Internet — Increase the Business %"
+            currentClaim={`Phone ${phonePercent}%, Internet ${internetPercent}%`}
+            optimalClaim={`Phone ${phoneOptimal}%, Internet ${internetOptimal}%`}
+            extraSavings={phoneInternetSavings}
+            body={`If you use your phone primarily for client calls, quotes, scheduling, and supplier orders — 80-90% business use is defensible. Internet for invoicing, supplier ordering, research, marketing — 50-70% is normal.
+
+YOUR CURRENT: Phone ${phonePercent}%, Internet ${internetPercent}% → extra deduction: ${formatMoney(phoneExtra + internetExtra)}/year
+DEFENSIBLE OPTIMAL: Phone ${phoneOptimal}%, Internet ${internetOptimal}%
+EXTRA TAX SAVED: ${formatMoney(phoneInternetSavings)}
+
+CRA expects the percentage to reflect REALITY. If asked, you should be able to explain how you arrived at it (e.g. "I track calls — 9 of 10 are work-related"). Don't claim 100% on a personal device — that invites audit.`}
+            legalBasis="T2125 line 9220 / ITA §18(1)(h)"
+            action={
+              <button onClick={() => navigate('/settings')} className="px-3 py-1.5 text-xs font-medium bg-teal-600 hover:bg-teal-700 text-white rounded-lg transition-colors">
+                Adjust percentages in Settings
+              </button>
+            }
+          />
+        ),
+      },
+      {
+        id: 'tools',
+        section: 'quick',
+        savings: 0,
+        show: true,
+        render: () => (
+          <TipCard
+            key="tools"
+            icon={Wrench}
+            title="Tools & Supplies Under $500 — Instant Deduction"
+            currentClaim={formatMoney(tipsData.toolExpenses)}
+            extraSavings={0}
+            body={`Any tool/equipment costing under $500 is 100% deductible the year you buy it (no CCA). For a painter, this covers most of what you buy:
+
+- Brushes, rollers, trays, drop cloths
+- Standard ladders (8-12 ft)
+- Hand tools (scrapers, putty knives)
+- Safety gear (boots, masks, eyewear, harnesses)
+- Smaller airless sprayers
+- Drop cloths, painter's tape, plastic sheeting
+
+You spent ${formatMoney(tipsData.toolExpenses)} on tools this year (saving ${formatMoney(taxSavingsFromDeduction(tipsData.toolExpenses, netIncome, selectedYear))} in tax).
+
+YEAR-END STRATEGY: If you'll need to replace anything in Q1, buy in December instead. Same money out the door, faster tax benefit.`}
+            legalBasis="ITA §20(1)(a) / Class 12 (100% CCA) for tools under $500"
+            action={
+              <button onClick={() => navigate('/expenses')} className="px-3 py-1.5 text-xs font-medium bg-teal-600 hover:bg-teal-700 text-white rounded-lg transition-colors">
+                Quick-add a tool purchase
+              </button>
+            }
+          />
+        ),
+      },
+      {
+        id: 'gst-itc',
+        section: 'quick',
+        savings: yearData.gstPaid * 0.1,
+        show: profile?.gst_enabled === true,
+        render: () => {
+          const estMissedItc = yearData.totalExpenses * 0.05 * 0.1;
+          return (
+            <TipCard
+              key="gst-itc"
+              icon={Receipt}
+              title="GST Input Tax Credits — Missed Dollars"
+              currentClaim={`ITCs: ${formatMoney(yearData.gstPaid)}`}
+              optimalClaim={estMissedItc > 0 ? `~${formatMoney(estMissedItc)} potentially missed` : undefined}
+              extraSavings={estMissedItc}
+              body={`You collected ${formatMoney(yearData.gstCollected)} in GST and claimed ${formatMoney(yearData.gstPaid)} in ITCs.
+
+EVERY business purchase with GST should generate an ITC:
+- Fuel (gas station receipts — yes, they have GST)
+- Materials & supplies
+- Tools
+- Phone and internet (business %)
+- Vehicle repairs & parts
+- Software (QuickBooks, Adobe, etc.)
+- Business meals (only 50% of the GST too, mirroring the deduction rule)
+- Parking
+- Vehicle leases (business portion)
+
+KEY: You need the receipt with GST registration number visible. Without it, no ITC. Take a photo immediately.`}
+              legalBasis="Excise Tax Act §169 / GST34 return"
+              action={
+                <button onClick={() => navigate('/expenses')} className="px-3 py-1.5 text-xs font-medium bg-teal-600 hover:bg-teal-700 text-white rounded-lg transition-colors">
+                  Add a missed expense with GST
+                </button>
+              }
+            />
+          );
+        },
+      },
+      {
+        id: 'capital-timing',
+        section: 'yearend',
+        savings: 300 * mRate,
+        show: isYearEnd,
+        render: () => {
+          const sprayer3k = taxSavingsFromDeduction(3000 * 0.5 * 0.2, netIncome, selectedYear);
+          const truck40k = taxSavingsFromDeduction(40000 * 0.5 * 0.3, netIncome, selectedYear);
+          return (
+            <TipCard
+              key="capital-timing"
+              icon={ShoppingCart}
+              title="Capital Assets — Timing the Purchase"
+              extraSavings={sprayer3k + truck40k}
+              body={`Buying equipment BEFORE Dec 31 lets you claim CCA this year (under the half-year rule, 50% of normal CCA in year one). Buying Jan 1 delays that deduction 12+ months.
+
+EXAMPLE FOR YOU:
+- $3,000 paint sprayer (Class 8, 20% CCA)
+  Bought Dec 31: deduct $300 this year (saves ${formatMoney(sprayer3k)})
+  Bought Jan 1: $0 this year, $600 next year
+
+- $40,000 work truck (Class 10, 30% CCA)
+  Bought Dec 31: deduct $6,000 this year (saves ${formatMoney(truck40k)})
+  Bought Jan 1: deduct $12,000 NEXT year
+
+If you're planning a purchase anyway, accelerate it. Don't buy junk just for the deduction — it must be needed for the business.`}
+              legalBasis="ITA §1100 / Class 8 (20%), Class 10 (30%), Class 10.1 (luxury), Class 50 (computers 55%)"
+            />
+          );
+        },
+      },
+      {
+        id: 'meals',
+        section: 'yearend',
+        savings: mealSavings,
+        show: true,
+        render: () => (
+          <TipCard
+            key="meals"
+            icon={Utensils}
+            title="Meals & Entertainment — Underclaimed"
+            currentClaim={formatMoney(tipsData.mealExpenses)}
+            optimalClaim={formatMoney(tipsData.mealExpenses + mealMissedEstimate * 0.5)}
+            extraSavings={mealSavings}
+            body={`Current claim: ${formatMoney(tipsData.mealExpenses)} (after 50% rule). Painters typically under-claim meals by $400-1,200/year.
+
+ELIGIBLE BUSINESS MEALS:
+- Coffee/lunch with a potential client during a quote
+- Lunch with a subcontractor discussing job logistics
+- Meals during overnight travel >40km from home
+- Meals provided to your subs on long jobs
+
+NOT eligible: your own daily lunch on a regular job site (CRA considers this personal)
+
+50% RULE: Only 50% is deductible. Save receipts and write the client/sub name and purpose on the back.
+
+EXCEPTION: Meals on overnight long-haul (>160km away) are 80% deductible if you're a transport worker, but painters typically don't qualify. Stick with 50%.`}
+            legalBasis="ITA §67.1 / T2125 line 8523"
+            action={
+              <button onClick={() => navigate('/expenses')} className="px-3 py-1.5 text-xs font-medium bg-teal-600 hover:bg-teal-700 text-white rounded-lg transition-colors">
+                Add a meal expense
+              </button>
+            }
+          />
+        ),
+      },
+      {
+        id: 'instalments',
+        section: 'yearend',
+        savings: quarterlyAmount > 1000 ? quarterlyAmount * 4 * 0.045 * 0.5 : 0,
+        show: taxBreakdown.totalTax > 3000,
+        render: () => {
+          const interestEarned = quarterlyAmount * 4 * 0.045 * 0.5;
+          return (
+            <TipCard
+              key="instalments"
+              icon={Calendar}
+              title="Quarterly Instalment Interest Play"
+              extraSavings={interestEarned}
+              body={`Your quarterly instalments: ${formatMoney(quarterlyAmount)} due Mar 15, Jun 15, Sep 15, Dec 15.
+
+STRATEGY: Park the money in a HISA (high-interest savings account) like EQ Bank or Wealthsimple Cash (4-5% APY in 2026) until each due date. On ${formatMoney(quarterlyAmount * 4)} in average float across the year, you earn approximately ${formatMoney(interestEarned)}.
+
+That interest is taxable, but it's yours instead of CRA's.
+
+WARNING: Don't miss a due date. Late instalment interest from CRA is currently ~8% — higher than HISA rates — and the penalties are nasty.`}
+              legalBasis="ITA §156 (instalments) / §161 (interest)"
+            />
+          );
+        },
+      },
+      {
+        id: 'income-smoothing',
+        section: 'yearend',
+        savings: 0,
+        show: isYearEnd,
+        render: () => {
+          const prevYearNet = profile?.prev_year_net_income || 0;
+          const isHigherThisYear = netIncome > prevYearNet && prevYearNet > 0;
+          return (
+            <TipCard
+              key="income-smoothing"
+              icon={BarChart3}
+              title="Income Smoothing Across Year-End"
+              body={prevYearNet > 0 ? (isHigherThisYear ?
+                `Your ${selectedYear} income (${formatMoney(netIncome)}) looks HIGHER than last year (${formatMoney(prevYearNet)}). Strategy: DELAY December invoices to January (taxed at potentially lower rate next year). ACCELERATE December expenses NOW — buy needed tools, prepay annual insurance, restock supplies. Each $1,000 of expenses moved to this year saves ${formatMoney(taxSavingsFromDeduction(1000, netIncome, selectedYear))} at your current rate.` :
+                `Your ${selectedYear} income (${formatMoney(netIncome)}) looks LOWER than last year (${formatMoney(prevYearNet)}). Strategy: ACCELERATE December invoices into this year so they're taxed at a lower rate. DELAY December expenses to January where they offset higher-bracket income.`
+              ) : `Set your previous year's net income in Settings > Tax Settings to get personalized income smoothing advice. This strategy can shift thousands of dollars between tax brackets.
+
+General rule: If next year will be higher income, delay invoices and accelerate expenses. If next year will be lower, accelerate invoices and delay expenses.`}
+              legalBasis="Timing / cash-method accounting under ITA §28"
+              missingData={prevYearNet === 0 ? 'Set your previous year net income in Settings > Tax Settings to get personalized smoothing advice.' : undefined}
+            />
+          );
+        },
+      },
+      {
+        id: 'checklist',
+        section: 'yearend',
+        savings: 0,
+        show: isChecklist,
+        render: () => {
+          const items = [
+            { key: 'invoices_sent', label: 'All completed jobs invoiced' },
+            { key: 'receipts_logged', label: 'All receipts logged in app' },
+            { key: 'mileage_complete', label: 'Vehicle mileage log complete and exported' },
+            { key: 'home_office_verified', label: 'Home office % verified and updated' },
+            { key: 'phone_internet_verified', label: 'Phone/internet % verified' },
+            { key: 'tools_q1', label: 'Tools needed for Q1 — buy by Dec 31?' },
+            { key: 'insurance_prepay', label: 'Annual insurance — prepay next year in Dec?' },
+            { key: 'courses_registered', label: 'Professional courses for Q1 — register by Dec 31?' },
+            { key: 'rrsp_decided', label: 'RRSP contribution decided (deadline Mar 2)' },
+            { key: 'tfsa_topped', label: 'TFSA topped up' },
+            { key: 'q4_instalment', label: 'Q4 instalment paid by Dec 15' },
+            { key: 'receipts_backed_up', label: 'All receipt PDFs/photos backed up' },
+            { key: 'mileage_saved', label: 'Mileage logbook digitally saved' },
+            { key: 'gst_q4', label: 'GST return filed for Q4' },
+            { key: 't2125_trial', label: 'T2125 trial-run with CPA before Feb' },
+          ];
+          const checkedCount = items.filter(i => checklist[i.key]).length;
+          return (
+            <div key="checklist" className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 overflow-hidden">
+              <div className="p-4 border-b border-gray-100 dark:border-gray-700">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-amber-50 dark:bg-amber-900/30 flex items-center justify-center">
+                    <ClipboardCheck className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Year-End Execution Checklist</h3>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">{checkedCount}/{items.length} complete</p>
+                  </div>
+                </div>
+                <div className="mt-2 h-1.5 bg-gray-100 dark:bg-gray-700 rounded-full overflow-hidden">
+                  <div className="h-full bg-amber-500 rounded-full transition-all" style={{ width: `${(checkedCount / items.length) * 100}%` }} />
+                </div>
+              </div>
+              <div className="p-4 space-y-2">
+                {items.map(item => (
+                  <label key={item.key} className="flex items-center gap-2.5 cursor-pointer group">
+                    <input
+                      type="checkbox"
+                      checked={checklist[item.key] || false}
+                      onChange={() => toggleChecklistItem(item.key)}
+                      className="rounded border-gray-300 dark:border-gray-600 text-teal-600 focus:ring-teal-500"
+                    />
+                    <span className={`text-sm ${checklist[item.key] ? 'text-gray-400 dark:text-gray-500 line-through' : 'text-gray-700 dark:text-gray-300'} group-hover:text-gray-900 dark:group-hover:text-white transition-colors`}>
+                      {item.label}
+                    </span>
+                  </label>
+                ))}
+              </div>
+              <div className="px-4 pb-4">
+                <p className="text-xs text-gray-400 dark:text-gray-500 font-mono">Checklist persists — your progress is saved.</p>
+              </div>
+            </div>
+          );
+        },
+      },
+      {
+        id: 'spouse',
+        section: 'longterm',
+        savings: netIncome > 60000 ? taxSavingsFromDeduction(8000, netIncome, selectedYear) - 8000 * 0.15 : 0,
+        show: netIncome > 60000,
+        render: () => {
+          const spouseSavings = taxSavingsFromDeduction(8000, netIncome, selectedYear);
+          return (
+            <TipCard
+              key="spouse"
+              icon={Users}
+              title="Spouse/Family Income Splitting"
+              extraSavings={spouseSavings - 8000 * 0.0}
+              body={`If your spouse or adult child does REAL work for the business — bookkeeping, invoicing, scheduling, marketing, job-site cleanup, helping with quotes — paying them at market rate shifts income from your ${(mRate * 100).toFixed(0)}% bracket to their lower bracket.
+
+EXAMPLE: Paying $8,000/year for ~5 hrs/week of bookkeeping ($30/hr) splits $8,000 from your ${bracket.currentBracket}% bracket. If your spouse has no other income, their effective rate on that $8,000 is roughly 0% (covered by basic personal amount of ~$16,129 federal + ~$22,323 AB). Net family savings: ${formatMoney(spouseSavings)}.
+
+CRA REQUIREMENTS:
+- Work must be real and documented (timesheet/job log)
+- Rate must match market value
+- Payment by traceable method (transfer, not cash)
+- Issue T4 if total > $500/year (basic withholding)
+- Cannot pay minors below working age for fictitious work
+
+RISK: CRA can reassess if amounts are unreasonable or work isn't real. Keep good records.`}
+              legalBasis="ITA §67 (reasonableness) / CRA Income Tax Folio S4-F3-C1"
+            />
+          );
+        },
+      },
+      {
+        id: 'tfsa',
+        section: 'longterm',
+        savings: 0,
+        show: true,
+        render: () => (
+          <TipCard
+            key="tfsa"
+            icon={Wallet}
+            title="TFSA — Tax-Free Forever"
+            currentClaim={tfsaRoom > 0 ? `${formatMoney(tfsaRoom)} room` : undefined}
+            missingData={!profile?.tfsa_room_remaining ? 'Set your TFSA room in Settings > Tax Settings to see personalized advice.' : undefined}
+            body={`Your TFSA room: ${formatMoney(tfsaRoom)}. No deduction today, but EVERY dollar of growth and EVERY withdrawal is tax-free FOREVER. Unlike RRSP, withdrawals don't count as income in retirement (won't claw back OAS).
+
+PRIORITY ORDER FOR EXTRA CASH:
+1. Emergency fund (3 months expenses, in HISA)
+2. RRSP if in top brackets (${bracket.currentBracket}%+ marginal)
+3. TFSA if in lower brackets or already maxed RRSP
+4. Pay down debt > 5% interest
+5. Non-registered investing
+
+2026 TFSA room: $7,000 + any unused room from prior years.`}
+            legalBasis="ITA §146.2 / T1 (no specific line — not deductible)"
+          />
+        ),
+      },
+      {
+        id: 'incorporate',
+        section: 'longterm',
+        savings: netIncome > 80000 ? (netIncome - 80000) * (mRate - 0.11) : 0,
+        show: netIncome > 75000,
+        render: () => {
+          const corpSavings = (netIncome - 80000) * (mRate - 0.11);
+          return (
+            <TipCard
+              key="incorporate"
+              icon={Building2}
+              title="Should You Incorporate?"
+              extraSavings={corpSavings > 0 ? corpSavings : 0}
+              body={`Your net income: ${formatMoney(netIncome)}. Incorporation starts making sense at this level — BUT only if you don't need to draw all the income personally.
+
+SMALL BUSINESS DEDUCTION (CCPC in AB):
+- First $500K of active income: 11% combined tax rate
+- Vs. your current personal rate of ~${(mRate * 100).toFixed(0)}% on top dollars
+
+EXTRA ANNUAL COSTS OF CORP:
+- Accountant: $1,500-3,000/year
+- Corporate registry: ~$100
+- T2 return prep: included in accountant fee usually
+- Separate bookkeeping discipline required
+
+ROUGH BREAKEVEN:
+- Net income > $80K
+- You can leave $20K+ inside the corp (retained earnings)
+- You're disciplined with bookkeeping
+- Don't incorporate if you spend every dollar personally — you give back the SBD via dividend tax
+
+NEXT STEP: Free consultation with a CPA who knows trades. Don't DIY this decision.`}
+              legalBasis="ITA §125 (Small Business Deduction)"
+            />
+          );
+        },
+      },
+      {
+        id: 'wcb',
+        section: 'dontforget',
+        savings: wcbSavings,
+        show: (tipsData.wcbPaid > 0 || wcbPremium > 0),
+        render: () => (
+          <TipCard
+            key="wcb"
+            icon={ShieldCheck}
+            title="WCB Premiums — Remember These Are Deductible"
+            currentClaim={formatMoney(tipsData.wcbPaid || wcbPremium)}
+            extraSavings={wcbSavings}
+            body={`You've paid ${formatMoney(tipsData.wcbPaid || wcbPremium)} in WCB premiums this year. 100% deductible on T2125 line 8690 (Insurance).
+
+Tax saved: ${formatMoney(wcbSavings)}.
+
+WHAT'S NOT DEDUCTIBLE: WCB penalties or interest charges (ITA §67.6). Track them separately — they're business costs but don't reduce tax.
+
+If you receive WCB benefits (injury): NOT business income. Goes on T1 line 14400, offsets on line 25000 — effectively tax-free.`}
+            legalBasis="T2125 line 8690 / ITA §67.6"
+          />
+        ),
+      },
+      {
+        id: 'profdev',
+        section: 'dontforget',
+        savings: 0,
+        show: true,
+        render: () => (
+          <TipCard
+            key="profdev"
+            icon={GraduationCap}
+            title="Professional Development & Memberships"
+            currentClaim={formatMoney(tipsData.profDevExpenses)}
+            body={`100% deductible:
+- Trade courses (PDCA, MPI training, color theory)
+- Safety certifications (WHMIS, fall protection, asbestos awareness, scaffolding)
+- Association memberships (Master Painters Institute, Calgary Construction Association)
+- Trade magazines, online subscriptions for painters
+- Business courses (QuickBooks, marketing)
+
+CURRENT CLAIM: ${formatMoney(tipsData.profDevExpenses)}
+TYPICAL FOR ACTIVE PAINTER: $800-2,000/year
+
+If you're not regularly investing in skills/certifications, either (a) you should be — it makes you more bookable, or (b) you're missing receipts.`}
+            legalBasis="T2125 line 8760 / ITA §18"
+            action={
+              <button onClick={() => navigate('/expenses')} className="px-3 py-1.5 text-xs font-medium bg-teal-600 hover:bg-teal-700 text-white rounded-lg transition-colors">
+                Add a professional development expense
+              </button>
+            }
+          />
+        ),
+      },
+    ];
+
+    const visibleCards = cards.filter(c => c.show);
+    const totalPotentialSavings = visibleCards.reduce((s, c) => s + c.savings, 0);
+
+    const sections = [
+      { key: 'quick', title: 'Quick Wins', subtitle: 'Highest dollar impact, easiest to action', cards: visibleCards.filter(c => c.section === 'quick') },
+      { key: 'yearend', title: 'Year-End Strategy', subtitle: 'Seasonal and timing plays', cards: visibleCards.filter(c => c.section === 'yearend') },
+      { key: 'longterm', title: 'Long-Term Plays', subtitle: 'Bigger life decisions', cards: visibleCards.filter(c => c.section === 'longterm') },
+      { key: 'dontforget', title: "Don't Forget", subtitle: 'Easy to miss', cards: visibleCards.filter(c => c.section === 'dontforget') },
+    ].filter(s => s.cards.length > 0);
 
     return (
-      <div className="space-y-2">
-        {tips.map((tip, idx) => (
-          <div key={idx} className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 overflow-hidden">
+      <div className="space-y-6">
+        {/* Total savings banner */}
+        {totalPotentialSavings > 0 && (
+          <div className="bg-gradient-to-r from-emerald-600 to-teal-600 rounded-xl p-5 text-white shadow-lg">
+            <p className="text-sm font-medium text-emerald-100 uppercase tracking-wide">Estimated extra savings if you action all open tips</p>
+            <p className="text-3xl font-bold mt-1">${Math.round(totalPotentialSavings).toLocaleString('en-CA')} <span className="text-base font-normal text-emerald-200">this year</span></p>
+          </div>
+        )}
+
+        {/* Sections */}
+        {sections.map(section => (
+          <div key={section.key}>
             <button
-              onClick={() => toggleTip(idx)}
-              className="w-full flex items-center justify-between p-4 text-left hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+              onClick={() => toggleSection(section.key)}
+              className="w-full flex items-center justify-between mb-3 group"
             >
-              <div className="flex-1 min-w-0">
-                <span className="text-sm font-medium text-gray-900 dark:text-white">{tip.title}</span>
-                {tip.savings && <span className="ml-2 text-xs font-medium text-emerald-600 dark:text-emerald-400">Save {tip.savings}</span>}
+              <div>
+                <h3 className="text-sm font-bold text-gray-900 dark:text-white uppercase tracking-wide">{section.title}</h3>
+                <p className="text-xs text-gray-500 dark:text-gray-400">{section.subtitle}</p>
               </div>
-              {expandedTips.has(idx) ? <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" /> : <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />}
+              {collapsedSections.has(section.key) ? (
+                <ChevronRight className="w-4 h-4 text-gray-400 group-hover:text-gray-600" />
+              ) : (
+                <ChevronDown className="w-4 h-4 text-gray-400 group-hover:text-gray-600" />
+              )}
             </button>
-            {expandedTips.has(idx) && (
-              <div className="px-4 pb-4 text-sm text-gray-600 dark:text-gray-400 leading-relaxed whitespace-pre-line border-t border-gray-100 dark:border-gray-700 pt-3">
-                {tip.content}
+            {!collapsedSections.has(section.key) && (
+              <div className="space-y-3">
+                {section.cards.map(card => card.render())}
               </div>
             )}
           </div>
         ))}
 
-        {showChecklist && (
-          <div className="bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-800 p-4 mt-4">
-            <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-200 mb-2">End-of-Year Checklist</h3>
-            <div className="space-y-2 text-sm text-amber-700 dark:text-amber-300">
-              {['All receipts logged', 'Mileage log up to date', 'Tools planned to buy before Dec 31', 'RRSP contribution decided', 'Final Q4 instalment paid', 'Client invoices sent for completed work', 'Expense receipts saved digitally'].map(item => (
-                <label key={item} className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" className="rounded border-amber-400 text-amber-600 focus:ring-amber-500" />
-                  <span>{item}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <p className="text-xs text-gray-400 dark:text-gray-500 text-center italic mt-4">
-          All recommendations are based on CRA published guidance for sole proprietorships. Estimates use current-year brackets and your data. Confirm specifics with a CPA before filing.
-        </p>
+        {/* Disclaimer */}
+        <div className="mt-8 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-200 dark:border-gray-700">
+          <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
+            All strategies are based on CRA published rules for sole proprietorships in Alberta as of {selectedYear}. Estimates use current-year tax brackets and YOUR data in this app. This is tax PLANNING (legal optimization), not tax advice. Confirm specifics with a CPA before filing your T2125. The app is not responsible for outcomes — you are.
+          </p>
+        </div>
       </div>
     );
-  }
-
-  function getTips() {
-    const homePercent = profile?.home_office_percent || 0;
-    const vehiclePercent = profile?.vehicle_business_use_percent || 0;
-    const phonePercent = profile?.phone_business_use_percent || 50;
-    const internetPercent = profile?.internet_business_use_percent || 25;
-    const homeExpenses = yearData.expensesByCategory['Business-use-of-home expenses'] || 0;
-    const mealExpenses = yearData.expensesByCategory['Meals & entertainment (50%)'] || 0;
-    const toolExpenses = yearData.expensesByCategory['Tools (under $500)'] || 0;
-    const supplyExpenses = yearData.expensesByCategory['Supplies'] || 0;
-    const fuelExpenses = yearData.expensesByCategory['Fuel costs'] || 0;
-    const vehicleExpenses = yearData.expensesByCategory['Motor vehicle expenses'] || 0;
-    const marginalRate = taxBreakdown.marginalRate;
-    const rrspRoom = profile?.rrsp_room_remaining || 0;
-    const tfsaRoom = profile?.tfsa_room_remaining || 7000;
-    const wcbPremium = profile?.wcb_annual_premium || 0;
-    const quarterlyAmount = taxBreakdown.totalTax / 4;
-
-    const phoneClaimHigher = ((85 - phonePercent) / 100) * 1200;
-    const internetClaimHigher = ((60 - internetPercent) / 100) * 960;
-    const phoneInternetExtra = Math.max(0, phoneClaimHigher) + Math.max(0, internetClaimHigher);
-
-    return [
-      {
-        title: 'RRSP Room Remaining',
-        savings: rrspRoom > 0 ? formatMoney(rrspRoom * marginalRate) : undefined,
-        content: `You have ${formatMoney(rrspRoom)} of unused RRSP contribution room. Contributing the maximum would reduce this year's taxable income by ${formatMoney(rrspRoom)} and save you approximately ${formatMoney(rrspRoom * marginalRate)} at your marginal rate of ${(marginalRate * 100).toFixed(1)}%.\n\nYou have until Mar 1, ${selectedYear + 1} to contribute for ${selectedYear}.\n\nSet your RRSP room in Settings (from your latest CRA Notice of Assessment).`
-      },
-      {
-        title: 'Home Office — Are You Underclaiming?',
-        savings: homePercent < 15 ? formatMoney((15 - homePercent) / 100 * 18000 * marginalRate) : undefined,
-        content: `You're claiming ${homePercent}% of home expenses. Most painters with a dedicated home office claim 12-20%.\n\nCurrent deduction this year: ${formatMoney(homeExpenses)}.\n\nIf your actual usage is higher, you could deduct significantly more. Measure: office sqft / total home sqft. If you have a dedicated room used only for business, claim that portion of:\n- Utilities\n- Internet\n- Property tax\n- Mortgage interest (NOT principal)\n- Home insurance\n- Maintenance\n- Rent (if applicable)\n\nCRA reference: T2125 Part 7, line 9945.`
-      },
-      {
-        title: 'Vehicle — Every Untracked KM Costs You',
-        savings: formatMoney(500 * 0.72 * marginalRate),
-        content: `You've logged ${formatMoney(fuelExpenses + vehicleExpenses).replace('$', '')} in vehicle expenses this year at ${vehiclePercent}% business use.\n\nAt the 2025 CRA rate of $0.72/km for the first 5,000 km and $0.66 thereafter, each untracked km costs you ~${formatMoney(0.72 * marginalRate)} in lost tax savings at your marginal rate.\n\nCommonly missed trips:\n- Drives to Home Depot / Rona\n- Client estimate meetings\n- Bank visits\n- Supplier pickups\n- Post office runs\n- Training / certification centres\n\nCRA reference: T2125 Chart A, line 9281.`
-      },
-      {
-        title: 'Capital Asset Timing',
-        savings: undefined,
-        content: `Planning to buy a ladder, sprayer, truck, or laptop? Buying BEFORE Dec 31 lets you claim CCA this year (Accelerated Investment Incentive — up to 100% immediate expensing for most eligible assets under $1.5M).\n\nBuying Jan 1 means waiting 12+ months for the same deduction.\n\nClass 10 (vehicles) = 30%/year declining balance.\nClass 8 (tools, equipment over $500) = 20%/year.\nClass 50 (computers) = 55%/year.\n\nCRA reference: ITA 20(1)(a), Reg. 1100.`
-      },
-      {
-        title: 'Pay Your Spouse / Family for Real Work',
-        savings: netIncome > 60000 ? formatMoney(5000 * (marginalRate - 0.15)) : undefined,
-        content: `If your spouse helps with bookkeeping, invoicing, scheduling, or marketing, paying them market rate ($20-30/hr) splits income from your ${(marginalRate * 100).toFixed(0)}% bracket to their lower one.\n\nPaying $5,000/year could save ${formatMoney(5000 * Math.max(0, marginalRate - 0.15))} depending on their income.\n\nREQUIREMENTS:\n- Work must be real and documented\n- Rate must be reasonable (market rate)\n- Paid by traceable transfer (not cash)\n- T4 issued if over $500/year\n- Keep time records\n\nCRA reference: ITA 67, CRA Income Tax Folio S4-F2-C2.`
-      },
-      {
-        title: 'Meals & Entertainment You\'re Missing',
-        savings: formatMoney(400 * 0.5 * marginalRate),
-        content: `You've claimed ${formatMoney(mealExpenses)} in meals this year (50% deductible).\n\nCommonly missed by painters:\n- Coffee/lunch with potential clients (estimate meetings)\n- Meals during overnight job travel (>40km from home)\n- Meals provided to your subs on site\n- Meals during training/courses\n\nAverage painter under-claims by $400-800/year. Save receipts and note the client name + business purpose on the back.\n\nCRA reference: ITA 67.1(1), T2125 line 8523.`
-      },
-      {
-        title: 'Phone & Internet Split',
-        savings: phoneInternetExtra > 0 ? formatMoney(phoneInternetExtra * marginalRate) : undefined,
-        content: `You're claiming ${phonePercent}% of phone and ${internetPercent}% of internet.\n\nIf you use your phone primarily for quotes, scheduling, photos of work, and client communication, 80-90% is defensible.\n\nInternet for invoicing, research, supplier ordering, online banking: 50-70% is reasonable.\n\nAt 85% phone / 60% internet you'd claim an extra ${formatMoney(phoneInternetExtra)}/year (saving ${formatMoney(phoneInternetExtra * marginalRate)} in tax).\n\nCRA reference: T2125 line 9220 (Telephone & utilities).`
-      },
-      {
-        title: 'Tools Under $500 — 100% Year-One Deduction',
-        savings: undefined,
-        content: `Any single tool/equipment under $500 is fully deductible the year you buy it (not depreciated through CCA). You spent ${formatMoney(toolExpenses + supplyExpenses)} on tools and supplies this year.\n\nFully deductible same-year items:\n- Brushes, rollers, trays, drop cloths\n- Basic ladders (under $500 each)\n- Safety gear (masks, glasses, harnesses)\n- Small power tools (sanders, grinders)\n- Paint guides, colour wheels\n- Measuring tools\n\nAnything you need to replace before Dec 31? Buy now, deduct now.\n\nCRA reference: T2125 line 8811 (Supplies), IT-291R3.`
-      },
-      {
-        title: 'GST Input Tax Credits — Don\'t Leave These Behind',
-        savings: formatMoney(yearData.gstPaid * 0.15),
-        content: `You've claimed ${formatMoney(yearData.gstPaid)} in ITCs against ${formatMoney(yearData.gstCollected)} collected.\n\n${profile?.gst_enabled ? 'You\'re registered — EVERY business purchase with GST should generate an ITC.' : 'You\'re not GST-registered. Once revenue exceeds $30,000, registration is mandatory. Even below that, voluntary registration lets you claim ITCs.'}\n\nCommon missed ITCs:\n- Gas (5% on every fill-up)\n- Tools and materials\n- Phone/internet bills\n- Software subscriptions\n- Business meals (50% of the GST)\n- Parking\n- Office supplies\n\nCRA reference: ETA 169(1), GST/HST Memorandum 8.1.`
-      },
-      {
-        title: 'Quarterly Instalment Strategy',
-        savings: quarterlyAmount > 1000 ? formatMoney(quarterlyAmount * 4 * 0.045 * 0.5) : undefined,
-        content: `Instalments are due Mar 15, Jun 15, Sep 15, Dec 15.\n\nYour estimated quarterly payment: ${formatMoney(quarterlyAmount)}.\n\nPark the money in a high-interest savings account (4-5% APY in 2026) until due. On ${formatMoney(quarterlyAmount)}/quarter over ~9 months of float, you earn approximately ${formatMoney(quarterlyAmount * 4 * 0.045 * 0.5)} in interest — taxable, but yours.\n\nBetter than CRA holding it interest-free.\n\nCRA reference: ITA 156, 163.1 (instalment interest).`
-      },
-      {
-        title: 'TFSA — After-Tax But Tax-Free Growth',
-        savings: undefined,
-        content: `Your estimated TFSA room: ${formatMoney(tfsaRoom)}. Anything inside grows tax-free forever and withdrawals don't count as income.\n\nNot a deduction TODAY, but a massive long-term win. ${selectedYear} annual room: $7,000. Cumulative room (if never contributed since 2009): $95,000.\n\nBest for: emergency fund, investment growth, or saving for a vehicle/equipment purchase.\n\nUnlike RRSP, withdrawals don't push you into a higher bracket.`
-      },
-      {
-        title: 'Income Smoothing Across Years',
-        savings: undefined,
-        content: `Your projected ${selectedYear} net income puts you in the ${(marginalRate * 100).toFixed(0)}% combined bracket (Federal+AB).\n\nIf next year will be higher: accelerate December invoices into this year to fill the current bracket.\n\nIf next year will be lower (slow winter, paternity leave, etc.): delay December invoices to January and accelerate December expenses (prepay insurance, buy tools, stock up on supplies).\n\nThis is legal tax timing — you control when you invoice and when you buy.\n\nCRA reference: General principle — income recognized when earned/receivable.`
-      },
-      {
-        title: 'Are You Past Incorporation Breakeven?',
-        savings: netIncome > 80000 ? formatMoney((netIncome - 80000) * (marginalRate - 0.11)) : undefined,
-        content: `Your projected net income: ${formatMoney(netIncome)}.\n\n${netIncome > 80000 ? 'At this level, incorporation starts making sense IF you can leave money in the corp.' : 'Below $80K, incorporation rarely makes sense — the compliance costs eat the savings.'}\n\nSmall business deduction in AB = 11% combined rate on retained earnings (vs your personal rate of ${(marginalRate * 100).toFixed(0)}% on top dollars).\n\nAnnual extra cost of a corp: ~$1,500-3,000 (accountant + corp T2 return + filings + annual return).\n\nRough breakeven: $80K+ net AND you can leave $20K+ in the corp each year.\n\nCRA reference: ITA 125, Alberta Corporate Tax Act.`
-      },
-      {
-        title: 'WCB Premiums — Fully Deductible',
-        savings: wcbPremium > 0 ? formatMoney(wcbPremium * marginalRate) : undefined,
-        content: `Your WCB premium of ${formatMoney(wcbPremium)} is fully deductible on T2125 line 8690 (Insurance).\n\nAt your marginal rate of ${(marginalRate * 100).toFixed(1)}%, this saves you ${formatMoney(wcbPremium * marginalRate)} in tax.\n\nIMPORTANT: WCB penalties and interest are NOT deductible (ITA 67.6). Only the premium itself qualifies.\n\nCRA reference: T2125 line 8690, ITA 18(1)(a).`
-      },
-    ];
   }
 
   function renderExport() {

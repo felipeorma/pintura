@@ -28,6 +28,7 @@ export interface Profile {
   industry_code: string | null;
   payment_instructions: string | null;
   rrsp_room_remaining: number | null;
+  rrsp_planned_contribution: number | null;
   tfsa_room_remaining: number | null;
   prev_year_net_income: number | null;
   card_slug: string | null;
