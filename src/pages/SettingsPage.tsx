@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { Profile } from '../lib/types';
-import { Save, Settings, DollarSign, Calculator, Home, ShieldCheck } from 'lucide-react';
+import { Save, Settings, DollarSign, Calculator, Home, ShieldCheck, CreditCard, Copy, Check } from 'lucide-react';
 
-type Tab = 'business' | 'defaults' | 'tax' | 'home' | 'wcb';
+type Tab = 'business' | 'defaults' | 'tax' | 'home' | 'wcb' | 'card';
 
 export function SettingsPage() {
   const { user } = useAuth();
@@ -13,6 +13,7 @@ export function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>('business');
+  const [slugCopied, setSlugCopied] = useState(false);
 
   useEffect(() => {
     if (user) loadProfile();
@@ -55,6 +56,13 @@ export function SettingsPage() {
       fiscal_year_start: profile.fiscal_year_start,
       industry_code: profile.industry_code,
       payment_instructions: profile.payment_instructions,
+      rrsp_room_remaining: profile.rrsp_room_remaining,
+      tfsa_room_remaining: profile.tfsa_room_remaining,
+      prev_year_net_income: profile.prev_year_net_income,
+      card_slug: profile.card_slug,
+      tagline: profile.tagline,
+      website: profile.website,
+      service_area: profile.service_area,
       updated_at: new Date().toISOString(),
     }).eq('id', user!.id);
     setSaving(false);
@@ -72,6 +80,7 @@ export function SettingsPage() {
     { key: 'tax', label: 'Tax Settings', icon: Calculator },
     { key: 'home', label: 'Home & Vehicle', icon: Home },
     { key: 'wcb', label: 'WCB', icon: ShieldCheck },
+    { key: 'card', label: 'Business Card', icon: CreditCard },
   ];
 
   if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-2 border-teal-600 border-t-transparent rounded-full" /></div>;
@@ -207,6 +216,25 @@ export function SettingsPage() {
                 <input type="text" value={profile.industry_code || '238320'} onChange={e => update('industry_code', e.target.value)} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
                 <p className="text-xs text-gray-400 mt-1">Painting & wall covering (238320). Used on T2125.</p>
               </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Previous Year Net Business Income ($)</label>
+                <input type="number" value={profile.prev_year_net_income ?? ''} onChange={e => update('prev_year_net_income', parseFloat(e.target.value) || null)} min={0} step={100} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+                <p className="text-xs text-gray-400 mt-1">Used for instalment estimates and RRSP contribution room calculations.</p>
+              </div>
+            </section>
+
+            <section className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4 space-y-4">
+              <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Registered Accounts</h2>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">RRSP Room Remaining ($)</label>
+                <input type="number" value={profile.rrsp_room_remaining ?? ''} onChange={e => update('rrsp_room_remaining', parseFloat(e.target.value) || null)} min={0} step={100} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+                <p className="text-xs text-gray-400 mt-1">From your latest CRA Notice of Assessment. Used in tax tip calculations.</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">TFSA Room Remaining ($)</label>
+                <input type="number" value={profile.tfsa_room_remaining ?? ''} onChange={e => update('tfsa_room_remaining', parseFloat(e.target.value) || null)} min={0} step={100} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+                <p className="text-xs text-gray-400 mt-1">Check your CRA My Account for current TFSA contribution room.</p>
+              </div>
             </section>
           </>
         )}
@@ -282,6 +310,66 @@ export function SettingsPage() {
                 <p className="text-xs text-gray-400 mt-1">Applied to vehicle-related expenses for deduction calculations.</p>
               </div>
             </section>
+          </>
+        )}
+
+        {activeTab === 'card' && (
+          <>
+            <section className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4 space-y-4">
+              <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Business Card Details</h2>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Card URL Slug</label>
+                <div className="flex gap-2">
+                  <div className="flex-1 flex items-center bg-gray-50 dark:bg-gray-900 border border-gray-300 dark:border-gray-600 rounded-lg px-3">
+                    <span className="text-xs text-gray-400 mr-1 whitespace-nowrap">/card/</span>
+                    <input type="text" value={profile.card_slug || ''} onChange={e => update('card_slug', e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))} placeholder="your-name" className="flex-1 py-2 bg-transparent text-gray-900 dark:text-white outline-none text-sm" />
+                  </div>
+                  {profile.card_slug && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(`${window.location.origin}/card/${profile.card_slug}`);
+                        setSlugCopied(true);
+                        setTimeout(() => setSlugCopied(false), 2000);
+                      }}
+                      className="px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                    >
+                      {slugCopied ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
+                    </button>
+                  )}
+                </div>
+                <p className="text-xs text-gray-400 mt-1">This creates a shareable public link to your business card.</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Tagline</label>
+                <input type="text" value={profile.tagline || ''} onChange={e => update('tagline', e.target.value)} placeholder="e.g. Professional painting services in Calgary" className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Website</label>
+                <input type="url" value={profile.website || ''} onChange={e => update('website', e.target.value)} placeholder="https://yoursite.com" className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Service Area</label>
+                <input type="text" value={profile.service_area || ''} onChange={e => update('service_area', e.target.value)} placeholder="e.g. Calgary & surrounding areas" className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+              </div>
+            </section>
+
+            {profile.card_slug && (
+              <section className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4 space-y-3">
+                <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Preview</h2>
+                <div className="bg-gradient-to-br from-teal-600 to-emerald-700 rounded-xl p-6 text-white shadow-lg">
+                  <div className="text-lg font-bold">{profile.business_name || 'Your Business'}</div>
+                  <div className="text-teal-100 text-sm mt-0.5">{profile.full_name}</div>
+                  {profile.tagline && <div className="text-teal-200 text-xs mt-2 italic">{profile.tagline}</div>}
+                  <div className="mt-4 space-y-1 text-sm text-teal-50">
+                    {profile.phone && <div>{profile.phone}</div>}
+                    {profile.email && <div>{profile.email}</div>}
+                    {profile.service_area && <div>{profile.service_area}</div>}
+                  </div>
+                </div>
+                <p className="text-xs text-gray-400">Your public card will be available at: <span className="font-mono text-gray-500">/card/{profile.card_slug}</span></p>
+              </section>
+            )}
           </>
         )}
 

@@ -368,6 +368,9 @@ export function TaxPage() {
 
   function renderTips() {
     const tips = getTips();
+    const now = new Date();
+    const showChecklist = now.getMonth() >= 10;
+
     return (
       <div className="space-y-2">
         {tips.map((tip, idx) => (
@@ -376,7 +379,10 @@ export function TaxPage() {
               onClick={() => toggleTip(idx)}
               className="w-full flex items-center justify-between p-4 text-left hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
             >
-              <span className="text-sm font-medium text-gray-900 dark:text-white">{tip.title}</span>
+              <div className="flex-1 min-w-0">
+                <span className="text-sm font-medium text-gray-900 dark:text-white">{tip.title}</span>
+                {tip.savings && <span className="ml-2 text-xs font-medium text-emerald-600 dark:text-emerald-400">Save {tip.savings}</span>}
+              </div>
               {expandedTips.has(idx) ? <ChevronDown className="w-4 h-4 text-gray-400 shrink-0" /> : <ChevronRight className="w-4 h-4 text-gray-400 shrink-0" />}
             </button>
             {expandedTips.has(idx) && (
@@ -386,6 +392,24 @@ export function TaxPage() {
             )}
           </div>
         ))}
+
+        {showChecklist && (
+          <div className="bg-amber-50 dark:bg-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-800 p-4 mt-4">
+            <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-200 mb-2">End-of-Year Checklist</h3>
+            <div className="space-y-2 text-sm text-amber-700 dark:text-amber-300">
+              {['All receipts logged', 'Mileage log up to date', 'Tools planned to buy before Dec 31', 'RRSP contribution decided', 'Final Q4 instalment paid', 'Client invoices sent for completed work', 'Expense receipts saved digitally'].map(item => (
+                <label key={item} className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" className="rounded border-amber-400 text-amber-600 focus:ring-amber-500" />
+                  <span>{item}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <p className="text-xs text-gray-400 dark:text-gray-500 text-center italic mt-4">
+          All recommendations are based on CRA published guidance for sole proprietorships. Estimates use current-year brackets and your data. Confirm specifics with a CPA before filing.
+        </p>
       </div>
     );
   }
@@ -396,25 +420,92 @@ export function TaxPage() {
     const phonePercent = profile?.phone_business_use_percent || 50;
     const internetPercent = profile?.internet_business_use_percent || 25;
     const homeExpenses = yearData.expensesByCategory['Business-use-of-home expenses'] || 0;
-    const marginalSavings5k = 5000 * taxBreakdown.marginalRate;
+    const mealExpenses = yearData.expensesByCategory['Meals & entertainment (50%)'] || 0;
+    const toolExpenses = yearData.expensesByCategory['Tools (under $500)'] || 0;
+    const supplyExpenses = yearData.expensesByCategory['Supplies'] || 0;
+    const fuelExpenses = yearData.expensesByCategory['Fuel costs'] || 0;
+    const vehicleExpenses = yearData.expensesByCategory['Motor vehicle expenses'] || 0;
+    const marginalRate = taxBreakdown.marginalRate;
+    const rrspRoom = profile?.rrsp_room_remaining || 0;
+    const tfsaRoom = profile?.tfsa_room_remaining || 7000;
+    const wcbPremium = profile?.wcb_annual_premium || 0;
+    const quarterlyAmount = taxBreakdown.totalTax / 4;
+
+    const phoneClaimHigher = ((85 - phonePercent) / 100) * 1200;
+    const internetClaimHigher = ((60 - internetPercent) / 100) * 960;
+    const phoneInternetExtra = Math.max(0, phoneClaimHigher) + Math.max(0, internetClaimHigher);
 
     return [
-      { title: '1. Business-Use-of-Home (T2125 Part 7)', content: `You're claiming ${homePercent}% of home expenses.\nBased on entries this year, deduction so far: ${formatMoney(homeExpenses)}.\nIncludes: utilities, internet, property tax, mortgage interest (NOT principal), insurance, maintenance, rent.\nLimit: cannot create or increase a business loss.` },
-      { title: '2. Vehicle Expenses (T2125 Chart A)', content: `Business use: ${vehiclePercent}%.\nKeep a logbook with total km and business km per trip.\nDeductible: fuel x business %, insurance x business %, maintenance x business %, lease payments x business % (capped), licensing, CCA on the vehicle.` },
-      { title: '3. Meals & Entertainment (50% rule)', content: `Only 50% is deductible. Separate this expense category.\nDoesn't apply to long-haul travel meals (those are 80%).` },
-      { title: '4. Tools, Supplies, Work Clothing', content: `Paint, brushes, rollers, drop cloths, ladders, scaffolding, coveralls, safety boots, masks — fully deductible the year purchased (if under $500). Larger items go through CCA.` },
-      { title: '5. Phone & Internet (business portion)', content: `Phone business use: ${phonePercent}%.\nInternet business use: ${internetPercent}%.\nDeduct only that portion of your bills.` },
-      { title: '6. Professional Development', content: `Courses, WHMIS, fall protection, asbestos awareness, association memberships (e.g. MPI), trade magazines — all deductible.` },
-      { title: '7. CPP Self-Employed (both halves)', content: `As self-employed you pay 11.9% CPP on net business income above $3,500 (max YMPE $71,300 in 2025). Half is deductible from taxable income — this estimate already accounts for that.\nYour estimated CPP: ${formatMoney(taxBreakdown.totalCpp)}.` },
-      { title: '8. RRSP Contribution Room', content: `Contribution limit: 18% of last year's earned income, up to $32,490 (2025 max). RRSP contributions reduce this year's taxable income dollar-for-dollar.\nEstimated tax savings on a $5,000 contribution at your marginal rate: ${formatMoney(marginalSavings5k)}.` },
-      { title: '9. TFSA (tax-free growth)', content: `No deduction today, but all growth and withdrawals are tax-free forever. 2025 room: $7,000 (plus any unused room).` },
-      { title: '10. Quarterly Instalment Compliance', content: `If your net tax owing exceeds $3,000, CRA requires quarterly instalments (March 15, June 15, Sept 15, Dec 15). Missing them triggers interest and penalties.` },
-      { title: '11. Should You Incorporate?', content: `At your current net income of ${formatMoney(netIncome)}, incorporation MAY make sense if income exceeds $80K-$100K AND you don't need to spend it all personally (small business rate = 11% combined fed+AB on active income under $500K). But it adds compliance costs (~$1,500-3,000/yr). Talk to a CPA.` },
-      { title: '12. GST/HST Registration Threshold', content: `Mandatory once gross revenue exceeds $30,000 in any 4 consecutive quarters. You're currently at ${formatMoney(yearData.revenue)} this year.${!profile?.gst_enabled ? ' Even below that, voluntary registration lets you claim ITCs on business purchases.' : ''}` },
-      { title: '13. Record Keeping (6 years)', content: `Keep all receipts, invoices, mileage logs, contracts for 6 years after the fiscal year. Digital copies are accepted if legible.` },
-      { title: '14. Capital Cost Allowance (CCA)', content: `Big purchases (truck, equipment > $500) aren't fully deducted year one — they depreciate via CCA classes.\nClass 10 (vehicles) = 30%/year.\nClass 8 (tools, equipment) = 20%/year.` },
-      { title: '15. WCB Premiums (100% Deductible)', content: `Your WCB premium is fully deductible on T2125 line 8690 (Insurance).\nAt your marginal rate of ${(taxBreakdown.marginalRate * 100).toFixed(1)}%, your premium saves approximately ${formatMoney((profile?.wcb_annual_premium || 0) * taxBreakdown.marginalRate)} in tax.\nIMPORTANT: WCB penalties and interest are NOT deductible (ITA 67.6). Only the premium itself qualifies.` },
-      { title: '16. WCB Benefits (If Injured)', content: `WCB benefits received (if injured) are reported on T1 line 14400 with an offsetting deduction on line 25000 — effectively tax-free at the federal level but still affects some calculations like clawbacks.\nYour benefits would be capped at your declared insurable earnings (${profile?.wcb_insurable_earnings ? formatMoney(profile.wcb_insurable_earnings) : 'not set'}) or actual net income, whichever is lower.` },
+      {
+        title: 'RRSP Room Remaining',
+        savings: rrspRoom > 0 ? formatMoney(rrspRoom * marginalRate) : undefined,
+        content: `You have ${formatMoney(rrspRoom)} of unused RRSP contribution room. Contributing the maximum would reduce this year's taxable income by ${formatMoney(rrspRoom)} and save you approximately ${formatMoney(rrspRoom * marginalRate)} at your marginal rate of ${(marginalRate * 100).toFixed(1)}%.\n\nYou have until Mar 1, ${selectedYear + 1} to contribute for ${selectedYear}.\n\nSet your RRSP room in Settings (from your latest CRA Notice of Assessment).`
+      },
+      {
+        title: 'Home Office — Are You Underclaiming?',
+        savings: homePercent < 15 ? formatMoney((15 - homePercent) / 100 * 18000 * marginalRate) : undefined,
+        content: `You're claiming ${homePercent}% of home expenses. Most painters with a dedicated home office claim 12-20%.\n\nCurrent deduction this year: ${formatMoney(homeExpenses)}.\n\nIf your actual usage is higher, you could deduct significantly more. Measure: office sqft / total home sqft. If you have a dedicated room used only for business, claim that portion of:\n- Utilities\n- Internet\n- Property tax\n- Mortgage interest (NOT principal)\n- Home insurance\n- Maintenance\n- Rent (if applicable)\n\nCRA reference: T2125 Part 7, line 9945.`
+      },
+      {
+        title: 'Vehicle — Every Untracked KM Costs You',
+        savings: formatMoney(500 * 0.72 * marginalRate),
+        content: `You've logged ${formatMoney(fuelExpenses + vehicleExpenses).replace('$', '')} in vehicle expenses this year at ${vehiclePercent}% business use.\n\nAt the 2025 CRA rate of $0.72/km for the first 5,000 km and $0.66 thereafter, each untracked km costs you ~${formatMoney(0.72 * marginalRate)} in lost tax savings at your marginal rate.\n\nCommonly missed trips:\n- Drives to Home Depot / Rona\n- Client estimate meetings\n- Bank visits\n- Supplier pickups\n- Post office runs\n- Training / certification centres\n\nCRA reference: T2125 Chart A, line 9281.`
+      },
+      {
+        title: 'Capital Asset Timing',
+        savings: undefined,
+        content: `Planning to buy a ladder, sprayer, truck, or laptop? Buying BEFORE Dec 31 lets you claim CCA this year (Accelerated Investment Incentive — up to 100% immediate expensing for most eligible assets under $1.5M).\n\nBuying Jan 1 means waiting 12+ months for the same deduction.\n\nClass 10 (vehicles) = 30%/year declining balance.\nClass 8 (tools, equipment over $500) = 20%/year.\nClass 50 (computers) = 55%/year.\n\nCRA reference: ITA 20(1)(a), Reg. 1100.`
+      },
+      {
+        title: 'Pay Your Spouse / Family for Real Work',
+        savings: netIncome > 60000 ? formatMoney(5000 * (marginalRate - 0.15)) : undefined,
+        content: `If your spouse helps with bookkeeping, invoicing, scheduling, or marketing, paying them market rate ($20-30/hr) splits income from your ${(marginalRate * 100).toFixed(0)}% bracket to their lower one.\n\nPaying $5,000/year could save ${formatMoney(5000 * Math.max(0, marginalRate - 0.15))} depending on their income.\n\nREQUIREMENTS:\n- Work must be real and documented\n- Rate must be reasonable (market rate)\n- Paid by traceable transfer (not cash)\n- T4 issued if over $500/year\n- Keep time records\n\nCRA reference: ITA 67, CRA Income Tax Folio S4-F2-C2.`
+      },
+      {
+        title: 'Meals & Entertainment You\'re Missing',
+        savings: formatMoney(400 * 0.5 * marginalRate),
+        content: `You've claimed ${formatMoney(mealExpenses)} in meals this year (50% deductible).\n\nCommonly missed by painters:\n- Coffee/lunch with potential clients (estimate meetings)\n- Meals during overnight job travel (>40km from home)\n- Meals provided to your subs on site\n- Meals during training/courses\n\nAverage painter under-claims by $400-800/year. Save receipts and note the client name + business purpose on the back.\n\nCRA reference: ITA 67.1(1), T2125 line 8523.`
+      },
+      {
+        title: 'Phone & Internet Split',
+        savings: phoneInternetExtra > 0 ? formatMoney(phoneInternetExtra * marginalRate) : undefined,
+        content: `You're claiming ${phonePercent}% of phone and ${internetPercent}% of internet.\n\nIf you use your phone primarily for quotes, scheduling, photos of work, and client communication, 80-90% is defensible.\n\nInternet for invoicing, research, supplier ordering, online banking: 50-70% is reasonable.\n\nAt 85% phone / 60% internet you'd claim an extra ${formatMoney(phoneInternetExtra)}/year (saving ${formatMoney(phoneInternetExtra * marginalRate)} in tax).\n\nCRA reference: T2125 line 9220 (Telephone & utilities).`
+      },
+      {
+        title: 'Tools Under $500 — 100% Year-One Deduction',
+        savings: undefined,
+        content: `Any single tool/equipment under $500 is fully deductible the year you buy it (not depreciated through CCA). You spent ${formatMoney(toolExpenses + supplyExpenses)} on tools and supplies this year.\n\nFully deductible same-year items:\n- Brushes, rollers, trays, drop cloths\n- Basic ladders (under $500 each)\n- Safety gear (masks, glasses, harnesses)\n- Small power tools (sanders, grinders)\n- Paint guides, colour wheels\n- Measuring tools\n\nAnything you need to replace before Dec 31? Buy now, deduct now.\n\nCRA reference: T2125 line 8811 (Supplies), IT-291R3.`
+      },
+      {
+        title: 'GST Input Tax Credits — Don\'t Leave These Behind',
+        savings: formatMoney(yearData.gstPaid * 0.15),
+        content: `You've claimed ${formatMoney(yearData.gstPaid)} in ITCs against ${formatMoney(yearData.gstCollected)} collected.\n\n${profile?.gst_enabled ? 'You\'re registered — EVERY business purchase with GST should generate an ITC.' : 'You\'re not GST-registered. Once revenue exceeds $30,000, registration is mandatory. Even below that, voluntary registration lets you claim ITCs.'}\n\nCommon missed ITCs:\n- Gas (5% on every fill-up)\n- Tools and materials\n- Phone/internet bills\n- Software subscriptions\n- Business meals (50% of the GST)\n- Parking\n- Office supplies\n\nCRA reference: ETA 169(1), GST/HST Memorandum 8.1.`
+      },
+      {
+        title: 'Quarterly Instalment Strategy',
+        savings: quarterlyAmount > 1000 ? formatMoney(quarterlyAmount * 4 * 0.045 * 0.5) : undefined,
+        content: `Instalments are due Mar 15, Jun 15, Sep 15, Dec 15.\n\nYour estimated quarterly payment: ${formatMoney(quarterlyAmount)}.\n\nPark the money in a high-interest savings account (4-5% APY in 2026) until due. On ${formatMoney(quarterlyAmount)}/quarter over ~9 months of float, you earn approximately ${formatMoney(quarterlyAmount * 4 * 0.045 * 0.5)} in interest — taxable, but yours.\n\nBetter than CRA holding it interest-free.\n\nCRA reference: ITA 156, 163.1 (instalment interest).`
+      },
+      {
+        title: 'TFSA — After-Tax But Tax-Free Growth',
+        savings: undefined,
+        content: `Your estimated TFSA room: ${formatMoney(tfsaRoom)}. Anything inside grows tax-free forever and withdrawals don't count as income.\n\nNot a deduction TODAY, but a massive long-term win. ${selectedYear} annual room: $7,000. Cumulative room (if never contributed since 2009): $95,000.\n\nBest for: emergency fund, investment growth, or saving for a vehicle/equipment purchase.\n\nUnlike RRSP, withdrawals don't push you into a higher bracket.`
+      },
+      {
+        title: 'Income Smoothing Across Years',
+        savings: undefined,
+        content: `Your projected ${selectedYear} net income puts you in the ${(marginalRate * 100).toFixed(0)}% combined bracket (Federal+AB).\n\nIf next year will be higher: accelerate December invoices into this year to fill the current bracket.\n\nIf next year will be lower (slow winter, paternity leave, etc.): delay December invoices to January and accelerate December expenses (prepay insurance, buy tools, stock up on supplies).\n\nThis is legal tax timing — you control when you invoice and when you buy.\n\nCRA reference: General principle — income recognized when earned/receivable.`
+      },
+      {
+        title: 'Are You Past Incorporation Breakeven?',
+        savings: netIncome > 80000 ? formatMoney((netIncome - 80000) * (marginalRate - 0.11)) : undefined,
+        content: `Your projected net income: ${formatMoney(netIncome)}.\n\n${netIncome > 80000 ? 'At this level, incorporation starts making sense IF you can leave money in the corp.' : 'Below $80K, incorporation rarely makes sense — the compliance costs eat the savings.'}\n\nSmall business deduction in AB = 11% combined rate on retained earnings (vs your personal rate of ${(marginalRate * 100).toFixed(0)}% on top dollars).\n\nAnnual extra cost of a corp: ~$1,500-3,000 (accountant + corp T2 return + filings + annual return).\n\nRough breakeven: $80K+ net AND you can leave $20K+ in the corp each year.\n\nCRA reference: ITA 125, Alberta Corporate Tax Act.`
+      },
+      {
+        title: 'WCB Premiums — Fully Deductible',
+        savings: wcbPremium > 0 ? formatMoney(wcbPremium * marginalRate) : undefined,
+        content: `Your WCB premium of ${formatMoney(wcbPremium)} is fully deductible on T2125 line 8690 (Insurance).\n\nAt your marginal rate of ${(marginalRate * 100).toFixed(1)}%, this saves you ${formatMoney(wcbPremium * marginalRate)} in tax.\n\nIMPORTANT: WCB penalties and interest are NOT deductible (ITA 67.6). Only the premium itself qualifies.\n\nCRA reference: T2125 line 8690, ITA 18(1)(a).`
+      },
     ];
   }
 

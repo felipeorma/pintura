@@ -15,8 +15,9 @@ import { DocumentsPage } from './pages/DocumentsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { VehiclePage } from './pages/VehiclePage';
 import { HomeOfficePage } from './pages/HomeOfficePage';
+import { BusinessCard } from './components/BusinessCard';
 
-function AppRoutes() {
+function ProtectedLayout() {
   const { user, loading } = useAuth();
 
   if (loading) {
@@ -29,25 +30,7 @@ function AppRoutes() {
 
   if (!user) return <AuthPage />;
 
-  return (
-    <Routes>
-      <Route element={<Layout />}>
-        <Route path="/" element={<DashboardPage />} />
-        <Route path="/hours" element={<WorkHoursPage />} />
-        <Route path="/sites" element={<JobSitesPage />} />
-        <Route path="/clients" element={<ClientsPage />} />
-        <Route path="/invoices" element={<InvoicesPage />} />
-        <Route path="/expenses" element={<ExpensesPage />} />
-        <Route path="/vehicle" element={<VehiclePage />} />
-        <Route path="/home-office" element={<HomeOfficePage />} />
-        <Route path="/tax" element={<TaxPage />} />
-        <Route path="/wcb" element={<WcbPage />} />
-        <Route path="/documents" element={<DocumentsPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Route>
-    </Routes>
-  );
+  return <Layout />;
 }
 
 export default function App() {
@@ -55,7 +38,24 @@ export default function App() {
     <ThemeProvider>
       <AuthProvider>
         <BrowserRouter>
-          <AppRoutes />
+          <Routes>
+            <Route path="/card/:slug" element={<BusinessCard />} />
+            <Route element={<ProtectedLayout />}>
+              <Route path="/" element={<DashboardPage />} />
+              <Route path="/hours" element={<WorkHoursPage />} />
+              <Route path="/sites" element={<JobSitesPage />} />
+              <Route path="/clients" element={<ClientsPage />} />
+              <Route path="/invoices" element={<InvoicesPage />} />
+              <Route path="/expenses" element={<ExpensesPage />} />
+              <Route path="/vehicle" element={<VehiclePage />} />
+              <Route path="/home-office" element={<HomeOfficePage />} />
+              <Route path="/tax" element={<TaxPage />} />
+              <Route path="/wcb" element={<WcbPage />} />
+              <Route path="/documents" element={<DocumentsPage />} />
+              <Route path="/settings" element={<SettingsPage />} />
+            </Route>
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
         </BrowserRouter>
       </AuthProvider>
     </ThemeProvider>

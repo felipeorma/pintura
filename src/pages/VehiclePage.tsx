@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { Client, JobSite } from '../lib/types';
-import { Plus, X, MapPin } from 'lucide-react';
+import { Plus, X, MapPin, Pencil, Trash2, Archive, ArchiveRestore } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, startOfYear, endOfYear } from 'date-fns';
+import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
 
 interface Vehicle {
   id: string;
@@ -62,8 +63,11 @@ export function VehiclePage() {
     km_driven: '',
     notes: '',
   });
+  const [editingLogId, setEditingLogId] = useState<string | null>(null);
   const [roundTrip, setRoundTrip] = useState(true);
   const [kmManualOverride, setKmManualOverride] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<{ type: 'vehicle' | 'trip'; id: string; name: string } | null>(null);
+  const [deleteUsage, setDeleteUsage] = useState('');
 
   useEffect(() => {
     if (user) loadData();
@@ -137,7 +141,7 @@ export function VehiclePage() {
 
   async function handleLogSubmit(e: React.FormEvent) {
     e.preventDefault();
-    await supabase.from('mileage_logs').insert({
+    const record = {
       user_id: user!.id,
       log_date: logForm.log_date,
       vehicle_id: logForm.vehicle_id || null,
@@ -148,11 +152,59 @@ export function VehiclePage() {
       purpose: logForm.purpose || null,
       km_driven: parseFloat(logForm.km_driven) || 0,
       notes: logForm.notes || null,
-    });
+    };
+    if (editingLogId) {
+      await supabase.from('mileage_logs').update(record).eq('id', editingLogId);
+    } else {
+      await supabase.from('mileage_logs').insert(record);
+    }
     setShowLogForm(false);
+    setEditingLogId(null);
     setLogForm({ log_date: format(new Date(), 'yyyy-MM-dd'), vehicle_id: '', client_id: '', job_site_id: '', start_location: '', destination: '', purpose: '', km_driven: '', notes: '' });
     setKmManualOverride(false);
     setRoundTrip(true);
+    loadData();
+  }
+
+  function editLog(log: MileageLog) {
+    setLogForm({
+      log_date: log.log_date,
+      vehicle_id: log.vehicle_id || '',
+      client_id: log.client_id || '',
+      job_site_id: log.job_site_id || '',
+      start_location: log.start_location || '',
+      destination: log.destination || '',
+      purpose: log.purpose || '',
+      km_driven: log.km_driven.toString(),
+      notes: log.notes || '',
+    });
+    setEditingLogId(log.id);
+    setShowLogForm(true);
+  }
+
+  async function toggleArchiveVehicle(v: Vehicle) {
+    await supabase.from('vehicles').update({ active: !v.active }).eq('id', v.id);
+    loadData();
+  }
+
+  async function handleDeleteVehicle(v: Vehicle) {
+    const { count } = await supabase.from('mileage_logs').select('id', { count: 'exact', head: true }).eq('vehicle_id', v.id);
+    if ((count || 0) > 0) {
+      setDeleteUsage(`Cannot delete — ${count} trip${count !== 1 ? 's' : ''} linked. Archive instead.`);
+    } else {
+      setDeleteUsage('');
+    }
+    setDeleteTarget({ type: 'vehicle', id: v.id, name: v.vehicle_name });
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget) return;
+    if (deleteTarget.type === 'vehicle') {
+      await supabase.from('vehicles').delete().eq('id', deleteTarget.id);
+    } else {
+      await supabase.from('mileage_logs').delete().eq('id', deleteTarget.id);
+    }
+    setDeleteTarget(null);
     loadData();
   }
 
@@ -226,15 +278,25 @@ export function VehiclePage() {
         {vehicles.length === 0 ? (
           <p className="text-sm text-gray-400 dark:text-gray-500">No vehicles added. Add your work vehicle to track mileage.</p>
         ) : vehicles.map(v => (
-          <div key={v.id} onClick={() => editVehicle(v)} className="bg-white dark:bg-gray-800 rounded-lg border border-gray-100 dark:border-gray-700 p-3 mb-2 cursor-pointer hover:border-teal-300 dark:hover:border-teal-700 transition-colors">
+          <div key={v.id} className="bg-white dark:bg-gray-800 rounded-lg border border-gray-100 dark:border-gray-700 p-3 mb-2">
             <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm font-medium text-gray-900 dark:text-white">{v.vehicle_name}</p>
-                <p className="text-xs text-gray-500 dark:text-gray-400">{[v.year, v.make, v.model].filter(Boolean).join(' ')}</p>
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-medium text-gray-900 dark:text-white">{v.vehicle_name}</p>
+                  {!v.active && <span className="text-xs bg-gray-100 dark:bg-gray-700 text-gray-500 px-1.5 py-0.5 rounded">Archived</span>}
+                </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400">{[v.year, v.make, v.model].filter(Boolean).join(' ')}{v.business_use_percent ? ` — ${v.business_use_percent.toFixed(0)}% business` : ''}</p>
               </div>
-              <div className="text-right">
-                {v.business_use_percent && <p className="text-sm font-semibold text-gray-900 dark:text-white">{v.business_use_percent.toFixed(0)}% biz</p>}
-                {v.business_km && <p className="text-xs text-gray-400">{v.business_km.toFixed(0)} km biz</p>}
+              <div className="flex items-center gap-0.5 shrink-0">
+                <button onClick={() => editVehicle(v)} className="p-1.5 text-gray-400 hover:text-teal-600" title="Edit">
+                  <Pencil className="w-4 h-4" />
+                </button>
+                <button onClick={() => toggleArchiveVehicle(v)} className="p-1.5 text-gray-400 hover:text-amber-600" title={v.active ? 'Archive' : 'Restore'}>
+                  {v.active ? <Archive className="w-4 h-4" /> : <ArchiveRestore className="w-4 h-4" />}
+                </button>
+                <button onClick={() => handleDeleteVehicle(v)} className="p-1.5 text-gray-400 hover:text-red-600" title="Delete">
+                  <Trash2 className="w-4 h-4" />
+                </button>
               </div>
             </div>
           </div>
@@ -262,7 +324,15 @@ export function VehiclePage() {
                   {(log as any).clients?.name && ` • ${(log as any).clients.name}`}
                 </p>
               </div>
-              <span className="text-sm font-semibold text-gray-900 dark:text-white ml-3">{log.km_driven} km</span>
+              <span className="text-sm font-semibold text-gray-900 dark:text-white ml-3 mr-2">{log.km_driven} km</span>
+              <div className="flex items-center gap-0.5 shrink-0">
+                <button onClick={() => editLog(log)} className="p-1.5 text-gray-400 hover:text-teal-600" title="Edit">
+                  <Pencil className="w-4 h-4" />
+                </button>
+                <button onClick={() => setDeleteTarget({ type: 'trip', id: log.id, name: `${log.start_location || '?'} → ${log.destination || '?'}` })} className="p-1.5 text-gray-400 hover:text-red-600" title="Delete">
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
             </div>
           </div>
         ))}
@@ -334,8 +404,8 @@ export function VehiclePage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
           <div className="bg-white dark:bg-gray-800 rounded-xl w-full max-w-md max-h-[90vh] overflow-y-auto shadow-xl">
             <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Log Business Trip</h2>
-              <button onClick={() => setShowLogForm(false)} className="p-1 text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{editingLogId ? 'Edit Trip' : 'Log Business Trip'}</h2>
+              <button onClick={() => { setShowLogForm(false); setEditingLogId(null); }} className="p-1 text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
             </div>
             <form onSubmit={handleLogSubmit} className="p-4 space-y-4">
               <div className="grid grid-cols-2 gap-3">
@@ -418,11 +488,26 @@ export function VehiclePage() {
                 <textarea value={logForm.notes} onChange={e => setLogForm(f => ({ ...f, notes: e.target.value }))} rows={2} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
               </div>
               <button type="submit" className="w-full py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-medium rounded-lg transition-colors">
-                Log Trip
+                {editingLogId ? 'Update Trip' : 'Log Trip'}
               </button>
             </form>
           </div>
         </div>
+      )}
+
+      {deleteTarget && (
+        <ConfirmDeleteModal
+          title={`Delete ${deleteTarget.type === 'vehicle' ? 'Vehicle' : 'Trip'}`}
+          itemName={deleteTarget.name}
+          usageInfo={deleteUsage || undefined}
+          onDelete={confirmDelete}
+          onArchive={deleteUsage && deleteTarget.type === 'vehicle' ? () => {
+            const v = vehicles.find(veh => veh.id === deleteTarget.id);
+            if (v) toggleArchiveVehicle(v);
+            setDeleteTarget(null);
+          } : undefined}
+          onCancel={() => setDeleteTarget(null)}
+        />
       )}
     </div>
   );
