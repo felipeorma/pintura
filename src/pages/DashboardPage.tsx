@@ -12,8 +12,10 @@ import { startOfMonth, endOfMonth, format, subMonths, differenceInDays, parseISO
 interface DashboardData {
   earnedThisMonth: number;
   earnedLastMonth: number;
+  employmentThisMonth: number;
   hoursThisMonth: number;
   taxSetAside: number;
+  taxWithheld: number;
   alerts: Alert[];
   recentActivity: ActivityItem[];
   weeklyEarnings: number[];
@@ -58,6 +60,7 @@ export function DashboardPage() {
       wcbInstRes, taxInstRes,
       clientsRes,
       recentHoursRes, recentInvRes, recentExpRes, recentTripsRes,
+      empRes, paystubMonthRes,
     ] = await Promise.all([
       supabase.from('invoices').select('subtotal').eq('user_id', user!.id).gte('invoice_date', monthStart).lte('invoice_date', monthEnd).not('status', 'eq', 'cancelled'),
       supabase.from('invoices').select('subtotal').eq('user_id', user!.id).gte('invoice_date', lastMonthStart).lte('invoice_date', lastMonthEnd).not('status', 'eq', 'cancelled'),
@@ -74,17 +77,23 @@ export function DashboardPage() {
       supabase.from('invoices').select('id, invoice_number, status, updated_at').eq('user_id', user!.id).order('updated_at', { ascending: false }).limit(4),
       supabase.from('expenses').select('id, expense_date, vendor, total_paid, created_at').eq('user_id', user!.id).order('created_at', { ascending: false }).limit(4),
       supabase.from('mileage_logs').select('id, log_date, km_driven, destination, created_at').eq('user_id', user!.id).order('created_at', { ascending: false }).limit(4),
+      supabase.from('employment_income').select('box_14_employment_income, box_22_income_tax_deducted').eq('user_id', user!.id).eq('year', now.getFullYear()),
+      supabase.from('paystubs').select('gross_pay, tax_withheld, pay_period_end').eq('user_id', user!.id).gte('pay_period_end', monthStart).lte('pay_period_end', monthEnd),
     ]);
 
     const earnedThisMonth = (monthInvRes.data || []).reduce((s, i) => s + (i.subtotal || 0), 0);
     const earnedLastMonth = (lastMonthInvRes.data || []).reduce((s, i) => s + (i.subtotal || 0), 0);
+    const employmentThisMonth = (paystubMonthRes.data || []).reduce((s, p) => s + (p.gross_pay || 0), 0);
     const hoursThisMonth = (monthHoursRes.data || []).reduce((s, r) => s + (r.total_hours || 0), 0);
 
     const yearRevenue = (yearInvRes.data || []).reduce((s, i) => s + (i.subtotal || 0), 0);
     const yearExpenses = (yearExpRes.data || []).reduce((s, e) => s + (e.deductible_amount || 0), 0);
-    const netIncome = yearRevenue - yearExpenses;
+    const yearEmpIncome = (empRes.data || []).reduce((s, e) => s + (e.box_14_employment_income || 0), 0);
+    const yearTaxWithheld = (empRes.data || []).reduce((s, e) => s + (e.box_22_income_tax_deducted || 0), 0);
+    const netBusinessIncome = yearRevenue - yearExpenses;
+    const totalIncome = netBusinessIncome + yearEmpIncome;
     const reservePercent = profileRes.data?.default_tax_reserve_percent || 30;
-    const taxSetAside = Math.max(0, netIncome * (reservePercent / 100));
+    const taxSetAside = Math.max(0, totalIncome * (reservePercent / 100) - yearTaxWithheld);
 
     // Build alerts
     const alerts: Alert[] = [];
@@ -143,8 +152,10 @@ export function DashboardPage() {
     setData({
       earnedThisMonth,
       earnedLastMonth,
+      employmentThisMonth,
       hoursThisMonth,
       taxSetAside,
+      taxWithheld: yearTaxWithheld,
       alerts,
       recentActivity: activity.slice(0, 8),
       weeklyEarnings,
@@ -198,8 +209,11 @@ export function DashboardPage() {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-teal-50 to-teal-100 dark:from-teal-900/30 dark:to-teal-800/20 border border-teal-200/50 dark:border-teal-800/50 p-5">
           <p className="text-xs font-medium text-teal-600 dark:text-teal-400 uppercase tracking-wide">Earned this month</p>
-          <p className="text-3xl font-bold text-gray-900 dark:text-white mt-1 tabular-nums">{formatMoney(data.earnedThisMonth)}</p>
-          {earnedDelta !== 0 && (
+          <p className="text-3xl font-bold text-gray-900 dark:text-white mt-1 tabular-nums">{formatMoney(data.earnedThisMonth + data.employmentThisMonth)}</p>
+          {data.employmentThisMonth > 0 && (
+            <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{formatMoney(data.earnedThisMonth)} business + {formatMoney(data.employmentThisMonth)} employment</p>
+          )}
+          {earnedDelta !== 0 && !data.employmentThisMonth && (
             <div className={`flex items-center gap-1 mt-1.5 text-xs font-medium ${earnedDelta > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
               {earnedDelta > 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
               {Math.abs(earnedDelta).toFixed(0)}% vs last month
@@ -218,7 +232,9 @@ export function DashboardPage() {
         <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-amber-50 to-amber-100 dark:from-amber-900/30 dark:to-amber-800/20 border border-amber-200/50 dark:border-amber-800/50 p-5">
           <p className="text-xs font-medium text-amber-600 dark:text-amber-400 uppercase tracking-wide">Tax set aside</p>
           <p className="text-3xl font-bold text-gray-900 dark:text-white mt-1 tabular-nums">{formatMoney(data.taxSetAside)}</p>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1.5">Year-to-date reserve</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1.5">
+            {data.taxWithheld > 0 ? `After ${formatMoney(data.taxWithheld)} withheld via T4` : 'Year-to-date reserve'}
+          </p>
           <Calendar className="absolute -bottom-2 -right-2 w-16 h-16 text-amber-200/40 dark:text-amber-700/30" />
         </div>
       </div>

@@ -58,7 +58,10 @@ export function SettingsPage() {
       payment_instructions: profile.payment_instructions,
       rrsp_room_remaining: profile.rrsp_room_remaining,
       tfsa_room_remaining: profile.tfsa_room_remaining,
+      tfsa_room_warning: profile.tfsa_room_warning,
+      tfsa_room_verified_date: profile.tfsa_room_verified_date,
       prev_year_net_income: profile.prev_year_net_income,
+      canada_training_credit_remaining: profile.canada_training_credit_remaining,
       card_slug: profile.card_slug,
       tagline: profile.tagline,
       website: profile.website,
@@ -234,6 +237,20 @@ export function SettingsPage() {
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">TFSA Room Remaining ($)</label>
                 <input type="number" value={profile.tfsa_room_remaining ?? ''} onChange={e => update('tfsa_room_remaining', parseFloat(e.target.value) || null)} min={0} step={100} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
                 <p className="text-xs text-gray-400 mt-1">Check your CRA My Account for current TFSA contribution room.</p>
+                <label className="flex items-center gap-2 mt-2 cursor-pointer">
+                  <input type="checkbox" checked={profile.tfsa_room_warning || false} onChange={e => update('tfsa_room_warning', e.target.checked)} className="rounded border-gray-300 text-amber-600 focus:ring-amber-500" />
+                  <span className="text-sm text-amber-700 dark:text-amber-300">CRA shows a warning on this number</span>
+                </label>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Previous Year Net Income ($)</label>
+                <input type="number" value={profile.prev_year_net_income ?? ''} onChange={e => update('prev_year_net_income', parseFloat(e.target.value) || null)} min={0} step={100} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+                <p className="text-xs text-gray-400 mt-1">NOA line 23600. Used for income smoothing tips.</p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Canada Training Credit Remaining ($)</label>
+                <input type="number" value={profile.canada_training_credit_remaining ?? ''} onChange={e => update('canada_training_credit_remaining', parseFloat(e.target.value) || null)} min={0} step={50} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+                <p className="text-xs text-gray-400 mt-1">Per your 2025 NOA. Max $250/year accumulation.</p>
               </div>
             </section>
           </>

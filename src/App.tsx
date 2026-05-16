@@ -15,6 +15,7 @@ import { DocumentsPage } from './pages/DocumentsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { VehiclePage } from './pages/VehiclePage';
 import { HomeOfficePage } from './pages/HomeOfficePage';
+import { EmploymentPage } from './pages/EmploymentPage';
 import { BusinessCard } from './components/BusinessCard';
 
 function ProtectedLayout() {
@@ -46,6 +47,7 @@ export default function App() {
               <Route path="/sites" element={<JobSitesPage />} />
               <Route path="/clients" element={<ClientsPage />} />
               <Route path="/invoices" element={<InvoicesPage />} />
+              <Route path="/employment" element={<EmploymentPage />} />
               <Route path="/expenses" element={<ExpensesPage />} />
               <Route path="/vehicle" element={<VehiclePage />} />
               <Route path="/home-office" element={<HomeOfficePage />} />

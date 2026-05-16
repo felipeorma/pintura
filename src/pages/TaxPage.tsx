@@ -2,18 +2,21 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import type { Profile } from '../lib/types';
+import type { Profile, PersonalTaxCredit, PersonalCreditType, EmploymentIncome } from '../lib/types';
+import { PERSONAL_CREDIT_TYPES } from '../lib/types';
 import { calculatePersonalTax, calculateGst, mapCategoryToT2125Line, isInstalmentRequired, calculateInstalmentAmount } from '../lib/taxCalculator';
+import type { TaxOptions } from '../lib/taxCalculator';
 import { marginalRate as getMarginalRate, taxSavingsFromDeduction, bracketHeadroom } from '../lib/taxOptimizer';
+import { getYearRates } from '../lib/taxRates';
 import { TipCard } from '../components/TipCard';
 import {
   Calculator, TrendingUp, Calendar, Lightbulb, Download, ChevronDown, ChevronRight, Check, AlertTriangle,
   Home, Car, Wrench, ShoppingCart, Users, Utensils, Phone, Receipt, PiggyBank, BarChart3,
-  Building2, ShieldCheck, GraduationCap, ClipboardCheck, Wallet
+  Building2, ShieldCheck, GraduationCap, ClipboardCheck, Wallet, Plus, Trash2, Award
 } from 'lucide-react';
 import { format } from 'date-fns';
 
-type Tab = 'summary' | 'personal' | 'instalments' | 'tips' | 'export';
+type Tab = 'summary' | 'personal' | 'credits' | 'instalments' | 'tips' | 'export';
 
 interface YearData {
   revenue: number;
@@ -58,6 +61,10 @@ export function TaxPage() {
   const [checklist, setChecklist] = useState<Record<string, boolean>>({});
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
   const [rrspPlanned, setRrspPlanned] = useState(0);
+  const [employmentData, setEmploymentData] = useState<EmploymentIncome[]>([]);
+  const [personalCredits, setPersonalCredits] = useState<PersonalTaxCredit[]>([]);
+  const [showCreditForm, setShowCreditForm] = useState(false);
+  const [creditForm, setCreditForm] = useState({ credit_type: 'tuition' as PersonalCreditType, amount: 0, description: '', t_form_received: false, notes: '' });
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -111,11 +118,16 @@ export function TaxPage() {
     setYearData({ revenue, gstCollected, gstPaid, expensesByCategory, totalExpenses });
     setInstalments(instRes.data || []);
 
-    const [mileageRes, workHoursRes, checklistRes] = await Promise.all([
+    const [mileageRes, workHoursRes, checklistRes, empRes, creditsRes] = await Promise.all([
       supabase.from('mileage_logs').select('km_driven, log_date').eq('user_id', user!.id).gte('log_date', yearStart).lte('log_date', yearEnd),
       supabase.from('work_hours').select('work_date').eq('user_id', user!.id).gte('work_date', yearStart).lte('work_date', yearEnd),
       supabase.from('year_end_checklist').select('item_key, checked').eq('user_id', user!.id).eq('year', selectedYear),
+      supabase.from('employment_income').select('*').eq('user_id', user!.id).eq('year', selectedYear),
+      supabase.from('personal_tax_credits').select('*').eq('user_id', user!.id).eq('year', selectedYear).order('created_at', { ascending: false }),
     ]);
+
+    setEmploymentData(empRes.data || []);
+    setPersonalCredits(creditsRes.data || []);
 
     const mileageLogs = mileageRes.data || [];
     const trackedKm = mileageLogs.reduce((s, l) => s + (l.km_driven || 0), 0);
@@ -181,12 +193,39 @@ export function TaxPage() {
   }
 
   const netIncome = yearData.revenue - yearData.totalExpenses;
-  const taxBreakdown = calculatePersonalTax(netIncome, selectedYear, otherIncome, rrspPlanned);
+  const totalEmploymentIncome = employmentData.reduce((s, e) => s + e.box_14_employment_income, 0);
+  const totalTaxWithheld = employmentData.reduce((s, e) => s + e.box_22_income_tax_deducted, 0);
+  const totalCppPaid = employmentData.reduce((s, e) => s + e.box_16_cpp_contributions, 0);
+  const totalEiPaid = employmentData.reduce((s, e) => s + e.box_18_ei_premiums, 0);
+  const totalUnionDues = employmentData.reduce((s, e) => s + e.box_44_union_dues, 0);
+  const totalRpp = employmentData.reduce((s, e) => s + e.box_20_rpp_contributions, 0);
+
+  const creditTotals = {
+    tuition: personalCredits.filter(c => c.credit_type === 'tuition').reduce((s, c) => s + c.amount, 0),
+    medical: personalCredits.filter(c => c.credit_type === 'medical').reduce((s, c) => s + c.amount, 0),
+    charitable: personalCredits.filter(c => c.credit_type === 'charitable').reduce((s, c) => s + c.amount, 0),
+    canadaTraining: personalCredits.filter(c => c.credit_type === 'canada_training').reduce((s, c) => s + c.amount, 0),
+  };
+
+  const taxOptions: TaxOptions = {
+    employmentIncome: totalEmploymentIncome,
+    taxAlreadyWithheld: totalTaxWithheld,
+    cppAlreadyPaid: totalCppPaid,
+    eiAlreadyPaid: totalEiPaid,
+    unionDues: totalUnionDues,
+    rppContributions: totalRpp,
+    rrspDeduction: rrspPlanned,
+    personalCredits: creditTotals,
+    otherIncome,
+  };
+
+  const taxBreakdown = calculatePersonalTax(netIncome, selectedYear, taxOptions);
   const gstSummary = calculateGst(yearData.gstCollected, yearData.gstPaid);
 
   const tabs: { key: Tab; label: string; icon: typeof Calculator }[] = [
     { key: 'summary', label: 'Summary', icon: Calculator },
     { key: 'personal', label: 'Tax Estimate', icon: TrendingUp },
+    { key: 'credits', label: 'Personal Credits', icon: Award },
     { key: 'instalments', label: 'Instalments', icon: Calendar },
     { key: 'tips', label: 'Tips', icon: Lightbulb },
     { key: 'export', label: 'Export', icon: Download },
@@ -251,6 +290,7 @@ export function TaxPage() {
 
       {activeTab === 'summary' && renderSummary()}
       {activeTab === 'personal' && renderPersonalTax()}
+      {activeTab === 'credits' && renderCredits()}
       {activeTab === 'instalments' && renderInstalments()}
       {activeTab === 'tips' && renderTips()}
       {activeTab === 'export' && renderExport()}
@@ -341,12 +381,24 @@ export function TaxPage() {
         </div>
 
         <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4 space-y-3">
-          <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Tax Breakdown</h3>
+          <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Income Summary</h3>
           <div className="space-y-2">
             <TaxRow label="Net business income" value={formatMoney(taxBreakdown.netBusinessIncome)} />
+            {totalEmploymentIncome > 0 && <TaxRow label="Employment income (T4)" value={formatMoney(totalEmploymentIncome)} />}
             {otherIncome > 0 && <TaxRow label="Other income" value={formatMoney(otherIncome)} />}
-            <TaxRow label="CPP deduction (half of CPP)" value={`-${formatMoney(taxBreakdown.cppDeduction)}`} />
+            <div className="border-t border-gray-200 dark:border-gray-700 pt-2">
+              <TaxRow label="Total income" value={formatMoney(taxBreakdown.totalIncome)} bold />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4 space-y-3">
+          <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">Deductions</h3>
+          <div className="space-y-2">
+            <TaxRow label="CPP deduction (half of self-employed CPP)" value={`-${formatMoney(taxBreakdown.cppDeduction)}`} />
             {rrspPlanned > 0 && <TaxRow label="RRSP deduction" value={`-${formatMoney(rrspPlanned)}`} />}
+            {totalUnionDues > 0 && <TaxRow label="Union dues (T4 box 44)" value={`-${formatMoney(totalUnionDues)}`} />}
+            {totalRpp > 0 && <TaxRow label="RPP contributions (T4 box 20)" value={`-${formatMoney(totalRpp)}`} />}
             <div className="border-t border-gray-200 dark:border-gray-700 pt-2">
               <TaxRow label="Taxable income" value={formatMoney(taxBreakdown.taxableIncome)} bold />
             </div>
@@ -358,9 +410,12 @@ export function TaxPage() {
           <div className="space-y-2">
             <TaxRow label="Federal income tax" value={formatMoney(taxBreakdown.federalTax)} />
             <TaxRow label="Alberta income tax" value={formatMoney(taxBreakdown.albertaTax)} />
-            <TaxRow label="CPP contributions (both halves)" value={formatMoney(taxBreakdown.totalCpp)} />
+            <TaxRow label="Self-employed CPP owing" value={formatMoney(taxBreakdown.selfEmployedCppOwing)} />
+            {taxBreakdown.personalCredits > 0 && <TaxRow label="Personal credits applied" value={`-${formatMoney(taxBreakdown.personalCredits)}`} color="text-emerald-600 dark:text-emerald-400" />}
+            {taxBreakdown.refundableCredits > 0 && <TaxRow label="Refundable credits (CTC)" value={`-${formatMoney(taxBreakdown.refundableCredits)}`} color="text-emerald-600 dark:text-emerald-400" />}
+            {totalTaxWithheld > 0 && <TaxRow label="Tax already withheld (T4)" value={`-${formatMoney(totalTaxWithheld)}`} color="text-emerald-600 dark:text-emerald-400" />}
             <div className="border-t border-gray-200 dark:border-gray-700 pt-2">
-              <TaxRow label="TOTAL ESTIMATED TAX" value={formatMoney(taxBreakdown.totalTax)} bold color="text-red-600 dark:text-red-400" />
+              <TaxRow label={taxBreakdown.totalTax >= 0 ? 'BALANCE OWING' : 'REFUND'} value={formatMoney(Math.abs(taxBreakdown.totalTax))} bold color={taxBreakdown.totalTax >= 0 ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'} />
             </div>
           </div>
         </div>
@@ -385,6 +440,125 @@ export function TaxPage() {
             Set aside ~{formatMoney(taxBreakdown.monthlyReserve)}/month for taxes.
           </p>
         </div>
+      </div>
+    );
+  }
+
+  function renderCredits() {
+    const totalCredits = personalCredits.reduce((s, c) => s + c.amount, 0);
+    const creditValue = creditTotals.tuition * 0.25 + creditTotals.medical * 0.25 + creditTotals.charitable * 0.29 + creditTotals.canadaTraining;
+
+    async function addCredit() {
+      if (!creditForm.amount) return;
+      await supabase.from('personal_tax_credits').insert({
+        user_id: user!.id,
+        year: selectedYear,
+        credit_type: creditForm.credit_type,
+        amount: creditForm.amount,
+        description: creditForm.description || null,
+        t_form_received: creditForm.t_form_received,
+        notes: creditForm.notes || null,
+      });
+      setCreditForm({ credit_type: 'tuition', amount: 0, description: '', t_form_received: false, notes: '' });
+      setShowCreditForm(false);
+      loadData();
+    }
+
+    async function deleteCredit(id: string) {
+      await supabase.from('personal_tax_credits').delete().eq('id', id);
+      loadData();
+    }
+
+    return (
+      <div className="space-y-4">
+        <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl border border-blue-200 dark:border-blue-800 p-3">
+          <p className="text-xs text-blue-700 dark:text-blue-300">These credits reduce your personal income tax via T1, not T2125 business expenses. They do not appear in your Tax Summary's expenses section.</p>
+        </div>
+
+        {totalCredits > 0 && (
+          <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4">
+            <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-2">{selectedYear} Credits Summary</h3>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Total claimed</p>
+                <p className="text-lg font-bold text-gray-900 dark:text-white">{formatMoney(totalCredits)}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-500 dark:text-gray-400">Approx tax reduction</p>
+                <p className="text-lg font-bold text-emerald-600">{formatMoney(creditValue)}</p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <button onClick={() => setShowCreditForm(true)} className="w-full flex items-center justify-center gap-2 p-3 bg-teal-600 hover:bg-teal-700 text-white rounded-xl font-medium text-sm transition-colors">
+          <Plus className="w-4 h-4" /> Add Personal Credit
+        </button>
+
+        {showCreditForm && (
+          <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 p-4 space-y-3">
+            <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Add Personal Tax Credit</h3>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="col-span-2">
+                <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Credit type</label>
+                <select value={creditForm.credit_type} onChange={e => setCreditForm(f => ({ ...f, credit_type: e.target.value as PersonalCreditType }))} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm">
+                  {PERSONAL_CREDIT_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Amount ($)</label>
+                <input type="number" value={creditForm.amount || ''} onChange={e => setCreditForm(f => ({ ...f, amount: parseFloat(e.target.value) || 0 }))} min={0} step="0.01" className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm" />
+              </div>
+              <div className="flex items-end">
+                <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-700 dark:text-gray-300">
+                  <input type="checkbox" checked={creditForm.t_form_received} onChange={e => setCreditForm(f => ({ ...f, t_form_received: e.target.checked }))} className="rounded border-gray-300 text-teal-600 focus:ring-teal-500" />
+                  Tax form received
+                </label>
+              </div>
+              <div className="col-span-2">
+                <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">Description</label>
+                <input type="text" value={creditForm.description} onChange={e => setCreditForm(f => ({ ...f, description: e.target.value }))} placeholder="e.g. SAIT tuition, dental work" className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm" />
+              </div>
+            </div>
+            {creditForm.credit_type === 'tuition' && (
+              <p className="text-xs text-amber-600 dark:text-amber-400">T2202 form needed from your institution. Usually available by February of the following year.</p>
+            )}
+            <div className="flex gap-2">
+              <button onClick={addCredit} className="flex-1 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-sm font-medium transition-colors">Save</button>
+              <button onClick={() => setShowCreditForm(false)} className="px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {personalCredits.length > 0 && (
+          <div className="space-y-2">
+            {personalCredits.map(credit => (
+              <div key={credit.id} className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 p-4">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold text-gray-900 dark:text-white">{PERSONAL_CREDIT_TYPES.find(t => t.value === credit.credit_type)?.label || credit.credit_type}</span>
+                      <span className="text-sm font-bold text-teal-600">{formatMoney(credit.amount)}</span>
+                    </div>
+                    {credit.description && <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{credit.description}</p>}
+                    <div className="flex items-center gap-2 mt-1">
+                      {credit.t_form_received ? (
+                        <span className="text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-1"><Check className="w-3 h-3" /> Form received</span>
+                      ) : (
+                        <span className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> Awaiting form</span>
+                      )}
+                    </div>
+                  </div>
+                  <button onClick={() => deleteCredit(credit.id)} className="p-1.5 text-gray-400 hover:text-red-600 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {personalCredits.length === 0 && !showCreditForm && (
+          <p className="text-center text-sm text-gray-400 dark:text-gray-500 py-8">No personal credits recorded for {selectedYear}.</p>
+        )}
       </div>
     );
   }
@@ -925,14 +1099,17 @@ RISK: CRA can reassess if amounts are unreasonable or work isn't real. Keep good
         section: 'longterm',
         savings: 0,
         show: true,
-        render: () => (
-          <TipCard
-            key="tfsa"
-            icon={Wallet}
-            title="TFSA — Tax-Free Forever"
-            currentClaim={tfsaRoom > 0 ? `${formatMoney(tfsaRoom)} room` : undefined}
-            missingData={!profile?.tfsa_room_remaining ? 'Set your TFSA room in Settings > Tax Settings to see personalized advice.' : undefined}
-            body={`Your TFSA room: ${formatMoney(tfsaRoom)}. No deduction today, but EVERY dollar of growth and EVERY withdrawal is tax-free FOREVER. Unlike RRSP, withdrawals don't count as income in retirement (won't claw back OAS).
+        render: () => {
+          const hasWarning = profile?.tfsa_room_warning && !profile?.tfsa_room_verified_date;
+          const warningText = hasWarning ? `WARNING: CRA has flagged your TFSA room. Click into CRA My Account to see the warning detail before treating this number as final. Common causes: recent unreported contributions, non-resident periods, or past over-contribution adjustments.\n\n` : '';
+          return (
+            <TipCard
+              key="tfsa"
+              icon={Wallet}
+              title="TFSA — Tax-Free Forever"
+              currentClaim={tfsaRoom > 0 ? `${formatMoney(tfsaRoom)} room` : undefined}
+              missingData={!profile?.tfsa_room_remaining ? 'Set your TFSA room in Settings > Tax Settings to see personalized advice.' : undefined}
+              body={`${warningText}Your TFSA room: ${formatMoney(tfsaRoom)}. No deduction today, but EVERY dollar of growth and EVERY withdrawal is tax-free FOREVER. Unlike RRSP, withdrawals don't count as income in retirement (won't claw back OAS).
 
 PRIORITY ORDER FOR EXTRA CASH:
 1. Emergency fund (3 months expenses, in HISA)
@@ -942,9 +1119,21 @@ PRIORITY ORDER FOR EXTRA CASH:
 5. Non-registered investing
 
 2026 TFSA room: $7,000 + any unused room from prior years.`}
-            legalBasis="ITA §146.2 / T1 (no specific line — not deductible)"
-          />
-        ),
+              legalBasis="ITA §146.2 / T1 (no specific line — not deductible)"
+              action={hasWarning ? (
+                <button
+                  onClick={async () => {
+                    await supabase.from('profiles').update({ tfsa_room_verified_date: new Date().toISOString().split('T')[0] }).eq('id', user!.id);
+                    loadData();
+                  }}
+                  className="px-3 py-1.5 text-xs font-medium bg-amber-600 hover:bg-amber-700 text-white rounded-lg transition-colors"
+                >
+                  I verified the warning — room is correct
+                </button>
+              ) : undefined}
+            />
+          );
+        },
       },
       {
         id: 'incorporate',
@@ -1036,6 +1225,75 @@ If you're not regularly investing in skills/certifications, either (a) you shoul
             }
           />
         ),
+      },
+      {
+        id: 't4-reduces-tax',
+        section: 'dontforget',
+        savings: 0,
+        show: totalEmploymentIncome > 0,
+        render: () => (
+          <TipCard
+            key="t4-reduces-tax"
+            icon={Award}
+            title="T4 Income Reduces Your Tax Surprise"
+            currentClaim={formatMoney(totalTaxWithheld) + ' withheld'}
+            body={`You earned ${formatMoney(totalEmploymentIncome)} as an employee this year with ${formatMoney(totalTaxWithheld)} already withheld for tax. This means you need to set aside LESS for your sole prop income.
+
+Your combined tax estimate factors this in — the "Balance Owing" on the Tax Estimate tab already subtracts what your employer withheld. No double-counting.
+
+If you expect employment income to continue, your quarterly instalments should be lower than a pure sole-prop calculation would suggest.`}
+            legalBasis="T1 line 43700 (total tax withheld) / ITA §153"
+          />
+        ),
+      },
+      {
+        id: 'cpp-no-double',
+        section: 'dontforget',
+        savings: 0,
+        show: totalEmploymentIncome > 0 && netIncome > 0,
+        render: () => (
+          <TipCard
+            key="cpp-no-double"
+            icon={ShieldCheck}
+            title="Verify CPP Hasn't Been Double-Counted"
+            currentClaim={`T4 CPP: ${formatMoney(totalCppPaid)}`}
+            body={`Your employer withheld ${formatMoney(totalCppPaid)} in CPP on your T4 income. When filing your T2125, you only owe CPP on business income for earnings BEYOND what your T4 already covered (total ceiling: $${getYearRates(selectedYear).cpp.ympe.toLocaleString()} in ${selectedYear}).
+
+The app has automatically accounted for this — your self-employed CPP owing (${formatMoney(taxBreakdown.selfEmployedCppOwing)}) already credits what was paid via T4.
+
+IMPORTANT: Keep your T4 slip. CRA cross-references employer remittances — if the numbers don't match, they'll reassess.`}
+            legalBasis="ITA §10 of Canada Pension Plan / Schedule 8"
+          />
+        ),
+      },
+      {
+        id: 'tuition-carry',
+        section: 'dontforget',
+        savings: creditTotals.tuition * 0.25,
+        show: creditTotals.tuition > 0,
+        render: () => {
+          const tuitionCreditFed = creditTotals.tuition * 0.15;
+          const tuitionCreditAB = creditTotals.tuition * 0.10;
+          const totalTuitionCredit = tuitionCreditFed + tuitionCreditAB;
+          const taxOwedBeforeCredit = taxBreakdown.federalTax + taxBreakdown.albertaTax + taxBreakdown.personalCredits;
+          const usedThisYear = Math.min(totalTuitionCredit, taxOwedBeforeCredit);
+          const carryForward = Math.max(0, totalTuitionCredit - usedThisYear);
+          return (
+            <TipCard
+              key="tuition-carry"
+              icon={GraduationCap}
+              title="Tuition Credits Stack Across Years"
+              currentClaim={formatMoney(creditTotals.tuition) + ' tuition'}
+              extraSavings={totalTuitionCredit}
+              body={`Your ${formatMoney(creditTotals.tuition)} in tuition this year generates ${formatMoney(totalTuitionCredit)} in credits (15% federal + 10% Alberta).
+
+${carryForward > 0 ? `Because your taxable income is relatively low this year, you'll likely only use ${formatMoney(usedThisYear)} of it. The remaining ${formatMoney(carryForward)} carries forward indefinitely OR can be transferred up to $5,000 to a parent, grandparent, or spouse.` : `At your current income level, you should be able to use the full credit this year.`}
+
+IMPORTANT: You need the T2202 form from your institution to claim. Usually available by February.`}
+              legalBasis="ITA §118.5 (tuition credit) / T1 lines 32300, 32400"
+            />
+          );
+        },
       },
     ];
 

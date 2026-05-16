@@ -3,7 +3,7 @@ import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import {
-  LayoutDashboard, Clock, MapPin, Users, FileText,
+  LayoutDashboard, Clock, MapPin, Users, FileText, Briefcase,
   Receipt, Calculator, ShieldCheck, FolderOpen, Settings,
   Menu, X, Moon, Sun, LogOut, PaintBucket, Car, Home
 } from 'lucide-react';
@@ -14,6 +14,7 @@ const navItems = [
   { to: '/sites', icon: MapPin, label: 'Job Sites' },
   { to: '/clients', icon: Users, label: 'Clients' },
   { to: '/invoices', icon: FileText, label: 'Invoices' },
+  { to: '/employment', icon: Briefcase, label: 'Employment' },
   { to: '/expenses', icon: Receipt, label: 'Expenses' },
   { to: '/vehicle', icon: Car, label: 'Vehicle' },
   { to: '/home-office', icon: Home, label: 'Home Office' },

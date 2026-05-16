@@ -31,6 +31,11 @@ export interface Profile {
   rrsp_planned_contribution: number | null;
   tfsa_room_remaining: number | null;
   prev_year_net_income: number | null;
+  previous_year_taxable_income: number | null;
+  last_noa_year: number | null;
+  canada_training_credit_remaining: number | null;
+  tfsa_room_warning: boolean;
+  tfsa_room_verified_date: string | null;
   card_slug: string | null;
   card_image_url: string | null;
   tagline: string | null;
@@ -267,3 +272,71 @@ export const DOCUMENT_TYPES = [
   'Job site photo',
   'Other',
 ] as const;
+
+export type PersonalCreditType = 'tuition' | 'medical' | 'charitable' | 'political' | 'canada_training' | 'other';
+
+export interface PersonalTaxCredit {
+  id: string;
+  user_id: string;
+  year: number;
+  credit_type: PersonalCreditType;
+  amount: number;
+  description: string | null;
+  receipt_url: string | null;
+  t_form_received: boolean;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface EmploymentIncome {
+  id: string;
+  user_id: string;
+  year: number;
+  employer_name: string;
+  employer_address: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  is_current: boolean;
+  position_title: string | null;
+  box_14_employment_income: number;
+  box_16_cpp_contributions: number;
+  box_17_qpp_contributions: number;
+  box_18_ei_premiums: number;
+  box_20_rpp_contributions: number;
+  box_22_income_tax_deducted: number;
+  box_24_ei_insurable_earnings: number;
+  box_26_cpp_pensionable_earnings: number;
+  box_44_union_dues: number;
+  box_46_charitable_donations: number;
+  box_52_pension_adjustment: number;
+  t4_received: boolean;
+  t4_filed_with_cra: boolean;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Paystub {
+  id: string;
+  user_id: string;
+  employment_income_id: string;
+  pay_period_end: string;
+  gross_pay: number;
+  cpp_withheld: number;
+  ei_withheld: number;
+  tax_withheld: number;
+  rpp_withheld: number;
+  other_deductions: number;
+  net_pay: number;
+  notes: string | null;
+  created_at: string;
+}
+
+export const PERSONAL_CREDIT_TYPES: { value: PersonalCreditType; label: string }[] = [
+  { value: 'tuition', label: 'Tuition (T2202)' },
+  { value: 'medical', label: 'Medical Expenses' },
+  { value: 'charitable', label: 'Charitable Donations' },
+  { value: 'political', label: 'Political Donations' },
+  { value: 'canada_training', label: 'Canada Training Credit' },
+  { value: 'other', label: 'Other' },
+];
