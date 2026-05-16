@@ -42,7 +42,6 @@ export function TaxPage() {
   const [yearData, setYearData] = useState<YearData>({ revenue: 0, gstCollected: 0, gstPaid: 0, expensesByCategory: {}, totalExpenses: 0 });
   const [instalments, setInstalments] = useState<Instalment[]>([]);
   const [otherIncome, setOtherIncome] = useState(0);
-  const [rrspDeduction, setRrspDeduction] = useState(0);
   const [tipsData, setTipsData] = useState<{
     trackedKm: number;
     workDays: number;
@@ -182,7 +181,7 @@ export function TaxPage() {
   }
 
   const netIncome = yearData.revenue - yearData.totalExpenses;
-  const taxBreakdown = calculatePersonalTax(netIncome, selectedYear, otherIncome, rrspDeduction);
+  const taxBreakdown = calculatePersonalTax(netIncome, selectedYear, otherIncome, rrspPlanned);
   const gstSummary = calculateGst(yearData.gstCollected, yearData.gstPaid);
 
   const tabs: { key: Tab; label: string; icon: typeof Calculator }[] = [
@@ -336,7 +335,7 @@ export function TaxPage() {
             </div>
             <div>
               <label className="block text-xs text-gray-500 dark:text-gray-400 mb-1">RRSP deduction</label>
-              <input type="number" value={rrspDeduction || ''} onChange={e => setRrspDeduction(parseFloat(e.target.value) || 0)} min={0} placeholder="0" className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm" />
+              <input type="number" value={rrspPlanned || ''} onChange={e => saveRrspPlanned(parseFloat(e.target.value) || 0)} min={0} placeholder="0" className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm" />
             </div>
           </div>
         </div>
@@ -347,7 +346,7 @@ export function TaxPage() {
             <TaxRow label="Net business income" value={formatMoney(taxBreakdown.netBusinessIncome)} />
             {otherIncome > 0 && <TaxRow label="Other income" value={formatMoney(otherIncome)} />}
             <TaxRow label="CPP deduction (half of CPP)" value={`-${formatMoney(taxBreakdown.cppDeduction)}`} />
-            {rrspDeduction > 0 && <TaxRow label="RRSP deduction" value={`-${formatMoney(rrspDeduction)}`} />}
+            {rrspPlanned > 0 && <TaxRow label="RRSP deduction" value={`-${formatMoney(rrspPlanned)}`} />}
             <div className="border-t border-gray-200 dark:border-gray-700 pt-2">
               <TaxRow label="Taxable income" value={formatMoney(taxBreakdown.taxableIncome)} bold />
             </div>
