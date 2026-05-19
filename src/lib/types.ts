@@ -52,6 +52,10 @@ export interface Client {
   contact_name: string | null;
   phone: string | null;
   email: string | null;
+  address: string | null;
+  city: string | null;
+  province: string | null;
+  postal_code: string | null;
   notes: string | null;
   active: boolean;
   created_at: string;
@@ -112,6 +116,8 @@ export interface Invoice {
   balance_due: number;
   notes: string | null;
   pdf_url: string | null;
+  show_business_address: boolean;
+  show_gst_number: boolean;
   created_at: string;
   updated_at: string;
   clients?: Client;
