@@ -184,14 +184,14 @@ export function generateInvoicePdf(
   const gstItemRow =
     invoice.gst_amount > 0
       ? `
-        <tr class="gst-line">
+        <tr>
           <td class="td td-muted nowrap">
             Tax
           </td>
 
           <td class="td description">
-            <span class="gst-main">GST ${GST_RATE_LABEL}</span>
-            <span class="gst-note">Goods and Services Tax</span>
+            GST ${GST_RATE_LABEL}
+            <span class="item-note">Goods and Services Tax</span>
           </td>
 
           <td class="td center">
@@ -253,7 +253,7 @@ export function generateInvoicePdf(
 
     .top-bar {
       height: 14px;
-      background: linear-gradient(90deg, #020617 0%, #0f766e 55%, #14b8a6 100%);
+      background: linear-gradient(90deg, #020617 0%, #1f2937 65%, #0f766e 100%);
     }
 
     .container {
@@ -307,7 +307,7 @@ export function generateInvoicePdf(
       font-weight: 800;
       letter-spacing: 0.18em;
       text-transform: uppercase;
-      color: #99f6e4;
+      color: #ccfbf1;
     }
 
     .total-value {
@@ -368,9 +368,9 @@ export function generateInvoicePdf(
       margin-top: 10px;
       padding: 6px 10px;
       border-radius: 999px;
-      background: #ecfdf5;
-      border: 1px solid #ccfbf1;
-      color: #0f766e;
+      background: #f8fafc;
+      border: 1px solid #cbd5e1;
+      color: #334155;
       font-size: 11px;
       font-weight: 800;
     }
@@ -464,6 +464,14 @@ export function generateInvoicePdf(
       font-weight: 600;
     }
 
+    .item-note {
+      display: block;
+      margin-top: 2px;
+      font-size: 10px;
+      color: #64748b;
+      font-weight: 600;
+    }
+
     .center {
       text-align: center;
     }
@@ -479,37 +487,6 @@ export function generateInvoicePdf(
     .amount {
       color: #111827;
       font-weight: 800;
-    }
-
-    .gst-line .td {
-      background: #ecfdf5;
-      border-top: 1px solid #99f6e4;
-      border-bottom: 1px solid #99f6e4;
-      color: #0f766e;
-    }
-
-    .gst-line .description {
-      color: #0f766e;
-      font-weight: 900;
-    }
-
-    .gst-line .amount {
-      color: #0f766e;
-      font-weight: 900;
-    }
-
-    .gst-main {
-      display: block;
-      color: #0f766e;
-      font-weight: 900;
-    }
-
-    .gst-note {
-      display: block;
-      margin-top: 2px;
-      font-size: 10px;
-      color: #14b8a6;
-      font-weight: 700;
     }
 
     .summary-section {
@@ -537,20 +514,6 @@ export function generateInvoicePdf(
 
     .summary-row strong {
       color: #111827;
-    }
-
-    .summary-row.gst-summary {
-      margin-top: 4px;
-      padding: 8px 10px;
-      border-radius: 12px;
-      background: #ecfdf5;
-      border: 1px solid #ccfbf1;
-      color: #0f766e;
-      font-weight: 700;
-    }
-
-    .summary-row.gst-summary strong {
-      color: #0f766e;
     }
 
     .summary-total {
@@ -613,7 +576,7 @@ export function generateInvoicePdf(
     }
 
     .footer strong {
-      color: #0f766e;
+      color: #334155;
     }
 
     @media print {
@@ -747,7 +710,7 @@ export function generateInvoicePdf(
           ${
             invoice.gst_amount > 0
               ? `
-                <div class="summary-row gst-summary">
+                <div class="summary-row">
                   <span>GST (${GST_RATE_LABEL})</span>
                   <strong>${formatCurrency(invoice.gst_amount)}</strong>
                 </div>
