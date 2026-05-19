@@ -159,8 +159,21 @@ export function SettingsPage() {
                   <input type="email" value={profile.email || ''} onChange={e => update('email', e.target.value)} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Phone</label>
-                  <input type="tel" value={profile.phone || ''} onChange={e => update('phone', e.target.value)} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Phone
+                  </label>
+                
+                  <input
+                    type="tel"
+                    value={profile.phone || ''}
+                    onChange={e => update('phone', formatPhoneNumber(e.target.value))}
+                    placeholder="+1(403)688-3487"
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                  />
+                
+                  <p className="text-xs text-gray-400 mt-1">
+                    Format: +1(403)688-3487
+                  </p>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
