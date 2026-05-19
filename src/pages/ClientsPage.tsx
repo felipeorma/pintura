@@ -2,13 +2,15 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { Client } from '../lib/types';
-import { Plus, X, Users, Pencil, Archive, ArchiveRestore, Trash2 } from 'lucide-react';
+import { Plus, X, Users, Pencil, Archive, ArchiveRestore, Trash2, AlertCircle } from 'lucide-react';
 import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
 
 export function ClientsPage() {
   const { user } = useAuth();
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Client | null>(null);
@@ -32,14 +34,23 @@ export function ClientsPage() {
   }, [user]);
 
   async function loadClients() {
-    const { data } = await supabase
+    setLoading(true);
+    setErrorMessage('');
+
+    const { data, error } = await supabase
       .from('clients')
       .select('*')
       .eq('user_id', user!.id)
       .order('active', { ascending: false })
       .order('name');
 
-    setClients(data || []);
+    if (error) {
+      setErrorMessage(error.message);
+      setClients([]);
+    } else {
+      setClients(data || []);
+    }
+
     setLoading(false);
   }
 
@@ -67,6 +78,18 @@ export function ClientsPage() {
     return `+1 (${area}) ${prefix}-${line}`;
   }
 
+  function formatPostalCode(value: string) {
+    const cleaned = value.toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+    if (!cleaned) return '';
+
+    if (/^[A-Z]\d[A-Z]\d[A-Z]\d$/.test(cleaned)) {
+      return `${cleaned.slice(0, 3)}-${cleaned.slice(3)}`;
+    }
+
+    return value.trim().toUpperCase();
+  }
+
   function formatClientAddress(client: Client) {
     const cityProvince = [client.city, client.province].filter(Boolean).join(', ');
     const cityLine = [cityProvince, client.postal_code].filter(Boolean).join(' ');
@@ -74,31 +97,66 @@ export function ClientsPage() {
     return [client.address, cityLine].filter(Boolean).join(' • ');
   }
 
+  function openCreateForm() {
+    setFormData({ ...emptyForm });
+    setEditingId(null);
+    setErrorMessage('');
+    setShowForm(true);
+  }
+
+  function closeForm() {
+    setShowForm(false);
+    setEditingId(null);
+    setFormData({ ...emptyForm });
+    setErrorMessage('');
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
 
+    if (!user || saving) return;
+
+    setSaving(true);
+    setErrorMessage('');
+
+    const formattedPhone = formData.phone ? formatCanadianPhone(formData.phone) : '';
+    const formattedPostalCode = formData.postal_code ? formatPostalCode(formData.postal_code) : '';
+
     const record = {
-      user_id: user!.id,
-      name: formData.name,
-      contact_name: formData.contact_name || null,
-      phone: formData.phone ? formatCanadianPhone(formData.phone) : null,
-      email: formData.email || null,
-      address: formData.address || null,
-      city: formData.city || null,
-      province: formData.province || null,
-      postal_code: formData.postal_code || null,
-      notes: formData.notes || null,
+      user_id: user.id,
+      name: formData.name.trim(),
+      contact_name: formData.contact_name.trim() || null,
+      phone: formattedPhone || null,
+      email: formData.email.trim() || null,
+      address: formData.address.trim() || null,
+      city: formData.city.trim() || null,
+      province: formData.province.trim().toUpperCase() || null,
+      postal_code: formattedPostalCode || null,
+      notes: formData.notes.trim() || null,
     };
 
-    if (editingId) {
-      await supabase.from('clients').update(record).eq('id', editingId);
-    } else {
-      await supabase.from('clients').insert(record);
+    if (!record.name) {
+      setErrorMessage('Client name is required.');
+      setSaving(false);
+      return;
+    }
+
+    const { error } = editingId
+      ? await supabase.from('clients').update(record).eq('id', editingId)
+      : await supabase.from('clients').insert(record);
+
+    if (error) {
+      setErrorMessage(
+        `${error.message}. If this mentions address, city, province, or postal_code, the migration has not been applied to the real Supabase database yet.`
+      );
+      setSaving(false);
+      return;
     }
 
     setShowForm(false);
     setEditingId(null);
-    setFormData(emptyForm);
+    setFormData({ ...emptyForm });
+    setSaving(false);
     loadClients();
   }
 
@@ -116,19 +174,29 @@ export function ClientsPage() {
     });
 
     setEditingId(client.id);
+    setErrorMessage('');
     setShowForm(true);
   }
 
   async function toggleArchive(client: Client) {
-    await supabase
+    setErrorMessage('');
+
+    const { error } = await supabase
       .from('clients')
       .update({ active: !client.active })
       .eq('id', client.id);
+
+    if (error) {
+      setErrorMessage(error.message);
+      return;
+    }
 
     loadClients();
   }
 
   async function handleDelete(client: Client) {
+    setErrorMessage('');
+
     const { count } = await supabase
       .from('work_hours')
       .select('id', { count: 'exact', head: true })
@@ -151,7 +219,18 @@ export function ClientsPage() {
   async function confirmDelete() {
     if (!deleteTarget) return;
 
-    await supabase.from('clients').delete().eq('id', deleteTarget.id);
+    setErrorMessage('');
+
+    const { error } = await supabase
+      .from('clients')
+      .delete()
+      .eq('id', deleteTarget.id);
+
+    if (error) {
+      setErrorMessage(error.message);
+      setDeleteTarget(null);
+      return;
+    }
 
     setDeleteTarget(null);
     loadClients();
@@ -173,17 +252,20 @@ export function ClientsPage() {
         </h1>
 
         <button
-          onClick={() => {
-            setFormData(emptyForm);
-            setEditingId(null);
-            setShowForm(true);
-          }}
+          onClick={openCreateForm}
           className="flex items-center gap-1.5 px-3 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium rounded-lg transition-colors"
         >
           <Plus className="w-4 h-4" />
           Add Client
         </button>
       </div>
+
+      {errorMessage && !showForm && (
+        <div className="mb-4 flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+          <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+          <p>{errorMessage}</p>
+        </div>
+      )}
 
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
@@ -194,14 +276,22 @@ export function ClientsPage() {
               </h2>
 
               <button
-                onClick={() => setShowForm(false)}
+                onClick={closeForm}
                 className="p-1 text-gray-400 hover:text-gray-600"
+                type="button"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <form onSubmit={handleSubmit} className="p-4 space-y-4">
+              {errorMessage && (
+                <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-900/20 dark:text-red-300">
+                  <AlertCircle className="w-4 h-4 mt-0.5 shrink-0" />
+                  <p>{errorMessage}</p>
+                </div>
+              )}
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   Company / Client Name
@@ -323,6 +413,12 @@ export function ClientsPage() {
                             province: e.target.value.toUpperCase(),
                           }))
                         }
+                        onBlur={e =>
+                          setFormData(f => ({
+                            ...f,
+                            province: e.target.value.trim().toUpperCase(),
+                          }))
+                        }
                         placeholder="AB"
                         maxLength={2}
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
@@ -343,7 +439,14 @@ export function ClientsPage() {
                             postal_code: e.target.value.toUpperCase(),
                           }))
                         }
-                        placeholder="T2P 0X1"
+                        onBlur={e =>
+                          setFormData(f => ({
+                            ...f,
+                            postal_code: formatPostalCode(e.target.value),
+                          }))
+                        }
+                        placeholder="T1S-1A1"
+                        maxLength={7}
                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                       />
                     </div>
@@ -368,9 +471,10 @@ export function ClientsPage() {
 
               <button
                 type="submit"
-                className="w-full py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-medium rounded-lg transition-colors"
+                disabled={saving}
+                className="w-full py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                {editingId ? 'Update' : 'Add Client'}
+                {saving ? 'Saving...' : editingId ? 'Update' : 'Add Client'}
               </button>
             </form>
           </div>
