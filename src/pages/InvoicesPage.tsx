@@ -113,13 +113,7 @@ function getBusinessAddressLines(profile: Profile | null) {
   return [profile.home_address, cityProvince].filter(Boolean);
 }
 
-function getGstRate(profile: Profile | null) {
-  if (!profile?.gst_enabled) return 0;
-
-  const rawRate = profile.gst_rate || 0.05;
-
-  return rawRate > 1 ? rawRate / 100 : rawRate;
-}
+const GST_RATE = 0.05;
 
 function formatCurrency(value: number | null | undefined) {
   return `$${(value || 0).toFixed(2)}`;
@@ -496,6 +490,7 @@ export function InvoicesPage() {
     setEditDate(inv.invoice_date);
     setEditDueDate(inv.due_date || '');
     setEditNotes(inv.notes || '');
+    setEditIncludeGst((inv.gst_amount || 0) > 0);
 
     setEditItems(
       (items || []).map(item => ({
@@ -513,7 +508,7 @@ export function InvoicesPage() {
 
     if (validItems.length === 0) return;
 
-    const gstRate = getGstRate(profile);
+    const gstRate = editIncludeGst ? GST_RATE : 0;
     const subtotal = validItems.reduce((s, i) => s + i.quantity * i.rate, 0);
     const gstAmount = subtotal * gstRate;
     const totalAmount = subtotal + gstAmount;
@@ -666,11 +661,17 @@ export function InvoicesPage() {
   const filtered =
     filterStatus === 'all' ? invoices : invoices.filter(i => i.status === filterStatus);
 
+  const selectedHoursSubtotal = uninvoicedHours
+    .filter(h => selectedHours.has(h.id))
+    .reduce((s, h) => s + (h.subtotal || 0), 0);
+
+  const selectedHoursGst = includeGst ? selectedHoursSubtotal * GST_RATE : 0;
+
   const serviceSubtotal = serviceItems.reduce((s, i) => s + i.quantity * i.rate, 0);
-  const serviceGst = serviceSubtotal * getGstRate(profile);
+  const serviceGst = includeGst ? serviceSubtotal * GST_RATE : 0;
 
   const editSubtotal = editItems.reduce((s, i) => s + i.quantity * i.rate, 0);
-  const editGst = editSubtotal * getGstRate(profile);
+  const editGst = editIncludeGst ? editSubtotal * GST_RATE : 0;
 
   const previewClientBilling = previewClient ? getClientBillingInfo(previewClient) : null;
   const previewClientAddressLines = previewClientBilling
@@ -791,6 +792,27 @@ export function InvoicesPage() {
                 </select>
               </div>
 
+              <div className="rounded-xl border border-teal-100 dark:border-teal-800 bg-teal-50 dark:bg-teal-900/20 p-3">
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={includeGst}
+                    onChange={e => setIncludeGst(e.target.checked)}
+                    className="mt-0.5 rounded border-gray-300 text-teal-600 focus:ring-teal-500"
+                  />
+
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                      Add GST 5%
+                    </p>
+
+                    <p className="text-xs text-gray-600 dark:text-gray-400">
+                      Adds GST as a separate tax line on the invoice and PDF.
+                    </p>
+                  </div>
+                </label>
+              </div>
+
               {invoiceMode === 'hours' && (
                 <>
                   {uninvoicedHours.length > 0 && (
@@ -838,6 +860,7 @@ export function InvoicesPage() {
                         ))}
                       </div>
 
+
                       {selectedHours.size > 0 && (
                         <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
                           <div className="flex justify-between text-sm">
@@ -845,28 +868,29 @@ export function InvoicesPage() {
                               Subtotal:
                             </span>
                             <span className="font-medium text-gray-900 dark:text-white">
-                              {formatCurrency(
-                                uninvoicedHours
-                                  .filter(h => selectedHours.has(h.id))
-                                  .reduce((s, h) => s + (h.subtotal || 0), 0)
-                              )}
+                              {formatCurrency(selectedHoursSubtotal)}
                             </span>
                           </div>
 
-                          {profile?.gst_enabled && (
-                            <div className="flex justify-between text-sm">
-                              <span className="text-gray-600 dark:text-gray-400">
-                                GST ({(getGstRate(profile) * 100).toFixed(0)}%):
+                          {includeGst && (
+                            <div className="mt-2 flex justify-between text-sm rounded-lg bg-teal-50 dark:bg-teal-900/20 px-2 py-1 border border-teal-100 dark:border-teal-800">
+                              <span className="font-medium text-teal-700 dark:text-teal-300">
+                                GST 5%
                               </span>
-                              <span className="font-medium text-gray-900 dark:text-white">
-                                {formatCurrency(
-                                  uninvoicedHours
-                                    .filter(h => selectedHours.has(h.id))
-                                    .reduce((s, h) => s + (h.gst_amount || 0), 0)
-                                )}
+                              <span className="font-semibold text-teal-700 dark:text-teal-300">
+                                {formatCurrency(selectedHoursGst)}
                               </span>
                             </div>
                           )}
+
+                          <div className="flex justify-between text-sm font-bold pt-2 mt-2 border-t border-gray-200 dark:border-gray-600">
+                            <span className="text-gray-900 dark:text-white">
+                              Total:
+                            </span>
+                            <span className="text-gray-900 dark:text-white">
+                              {formatCurrency(selectedHoursSubtotal + selectedHoursGst)}
+                            </span>
+                          </div>
                         </div>
                       )}
 
@@ -987,6 +1011,7 @@ export function InvoicesPage() {
                     />
                   </div>
 
+
                   {serviceSubtotal > 0 && (
                     <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 space-y-1">
                       <div className="flex justify-between text-sm">
@@ -998,18 +1023,18 @@ export function InvoicesPage() {
                         </span>
                       </div>
 
-                      {profile?.gst_enabled && (
-                        <div className="flex justify-between text-sm">
-                          <span className="text-gray-600 dark:text-gray-400">
-                            GST ({(getGstRate(profile) * 100).toFixed(0)}%):
+                      {includeGst && (
+                        <div className="mt-2 flex justify-between text-sm rounded-lg bg-teal-50 dark:bg-teal-900/20 px-2 py-1 border border-teal-100 dark:border-teal-800">
+                          <span className="font-medium text-teal-700 dark:text-teal-300">
+                            GST 5%
                           </span>
-                          <span className="font-medium text-gray-900 dark:text-white">
+                          <span className="font-semibold text-teal-700 dark:text-teal-300">
                             {formatCurrency(serviceGst)}
                           </span>
                         </div>
                       )}
 
-                      <div className="flex justify-between text-sm font-bold pt-1 border-t border-gray-200 dark:border-gray-600">
+                      <div className="flex justify-between text-sm font-bold pt-2 mt-2 border-t border-gray-200 dark:border-gray-600">
                         <span className="text-gray-900 dark:text-white">
                           Total:
                         </span>
@@ -1077,6 +1102,28 @@ export function InvoicesPage() {
                     className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                   />
                 </div>
+              </div>
+
+
+              <div className="rounded-xl border border-teal-100 dark:border-teal-800 bg-teal-50 dark:bg-teal-900/20 p-3">
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editIncludeGst}
+                    onChange={e => setEditIncludeGst(e.target.checked)}
+                    className="mt-0.5 rounded border-gray-300 text-teal-600 focus:ring-teal-500"
+                  />
+
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                      Add GST 5%
+                    </p>
+
+                    <p className="text-xs text-gray-600 dark:text-gray-400">
+                      Applies GST to this edited invoice.
+                    </p>
+                  </div>
+                </label>
               </div>
 
               <div className="space-y-3">
@@ -1185,6 +1232,7 @@ export function InvoicesPage() {
                 />
               </div>
 
+
               {editSubtotal > 0 && (
                 <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 space-y-1">
                   <div className="flex justify-between text-sm">
@@ -1196,18 +1244,18 @@ export function InvoicesPage() {
                     </span>
                   </div>
 
-                  {profile?.gst_enabled && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600 dark:text-gray-400">
-                        GST ({(getGstRate(profile) * 100).toFixed(0)}%):
+                  {editIncludeGst && (
+                    <div className="mt-2 flex justify-between text-sm rounded-lg bg-teal-50 dark:bg-teal-900/20 px-2 py-1 border border-teal-100 dark:border-teal-800">
+                      <span className="font-medium text-teal-700 dark:text-teal-300">
+                        GST 5%
                       </span>
-                      <span className="font-medium text-gray-900 dark:text-white">
+                      <span className="font-semibold text-teal-700 dark:text-teal-300">
                         {formatCurrency(editGst)}
                       </span>
                     </div>
                   )}
 
-                  <div className="flex justify-between text-sm font-bold pt-1 border-t border-gray-200 dark:border-gray-600">
+                  <div className="flex justify-between text-sm font-bold pt-2 mt-2 border-t border-gray-200 dark:border-gray-600">
                     <span className="text-gray-900 dark:text-white">
                       Total:
                     </span>
@@ -1399,6 +1447,36 @@ export function InvoicesPage() {
                         </td>
                       </tr>
                     ))}
+
+                    {previewInvoice.gst_amount > 0 && (
+                      <tr className="bg-teal-50 dark:bg-teal-900/20 border-t border-teal-100 dark:border-teal-800">
+                        <td className="px-4 py-3 text-teal-700 dark:text-teal-300 whitespace-nowrap text-xs font-semibold">
+                          Tax
+                        </td>
+
+                        <td className="px-4 py-3">
+                          <p className="text-teal-800 dark:text-teal-200 font-bold">
+                            GST 5%
+                          </p>
+                          <p className="text-xs text-teal-600 dark:text-teal-400">
+                            Goods and Services Tax
+                          </p>
+                        </td>
+
+                        <td className="px-4 py-3 text-center text-teal-700 dark:text-teal-300">
+                          -
+                        </td>
+
+                        <td className="px-4 py-3 text-right text-teal-700 dark:text-teal-300 font-semibold">
+                          5%
+                        </td>
+
+                        <td className="px-4 py-3 text-right font-bold text-teal-800 dark:text-teal-200">
+                          {formatCurrency(previewInvoice.gst_amount)}
+                        </td>
+                      </tr>
+                    )}
+
                   </tbody>
                 </table>
               </div>
@@ -1415,11 +1493,11 @@ export function InvoicesPage() {
                   </div>
 
                   {previewInvoice.gst_amount > 0 && (
-                    <div className="flex justify-between text-sm">
-                      <span className="text-gray-600 dark:text-gray-400">
-                        GST
+                    <div className="flex justify-between text-sm rounded-lg bg-teal-50 dark:bg-teal-900/20 px-2 py-1 border border-teal-100 dark:border-teal-800">
+                      <span className="font-medium text-teal-700 dark:text-teal-300">
+                        GST 5%
                       </span>
-                      <span className="font-medium text-gray-900 dark:text-white">
+                      <span className="font-semibold text-teal-700 dark:text-teal-300">
                         {formatCurrency(previewInvoice.gst_amount)}
                       </span>
                     </div>
