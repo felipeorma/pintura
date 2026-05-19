@@ -6,6 +6,7 @@ export interface Profile {
   phone: string;
   city: string;
   province: string;
+  postal_code: string | null;
   home_address: string | null;
   business_number: string | null;
   gst_enabled: boolean;
