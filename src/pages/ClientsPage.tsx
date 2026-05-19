@@ -122,13 +122,24 @@ export function ClientsPage() {
     const formattedPhone = formData.phone ? formatCanadianPhone(formData.phone) : '';
     const formattedPostalCode = formData.postal_code ? formatPostalCode(formData.postal_code) : '';
 
+    const billingAddressText = [
+      formData.address.trim(),
+      [formData.city.trim(), formData.province.trim().toUpperCase()].filter(Boolean).join(', '),
+      formattedPostalCode,
+    ].filter(Boolean).join(' ');
+    
+    const notesWithBilling = [
+      formData.notes.trim(),
+      billingAddressText ? `Billing Address: ${billingAddressText}` : '',
+    ].filter(Boolean).join('\n');
+    
     const record = {
       user_id: user.id,
       name: formData.name.trim(),
       contact_name: formData.contact_name.trim() || null,
       phone: formattedPhone || null,
       email: formData.email.trim() || null,
-      notes: formData.notes.trim() || null,
+      notes: notesWithBilling || null,
     };
 
     if (!record.name) {
