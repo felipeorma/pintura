@@ -78,6 +78,29 @@ export function SettingsPage() {
     setProfile(p => ({ ...p, [field]: value }));
   }
 
+  function formatPhoneNumber(value: string) {
+    let digits = value.replace(/\D/g, '');
+  
+    if (!digits) return '';
+  
+    if (digits[0] !== '1') {
+      digits = `1${digits}`;
+    }
+  
+    digits = digits.slice(0, 11);
+  
+    const country = digits.slice(0, 1);
+    const area = digits.slice(1, 4);
+    const prefix = digits.slice(4, 7);
+    const line = digits.slice(7, 11);
+  
+    if (digits.length <= 1) return `+${country}`;
+    if (digits.length <= 4) return `+${country}(${area}`;
+    if (digits.length <= 7) return `+${country}(${area})${prefix}`;
+  
+    return `+${country}(${area})${prefix}-${line}`;
+  }
+  
   const tabs: { key: Tab; label: string; icon: typeof Settings }[] = [
     { key: 'business', label: 'Business Info', icon: Settings },
     { key: 'defaults', label: 'Defaults', icon: DollarSign },
