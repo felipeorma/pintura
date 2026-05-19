@@ -143,6 +143,7 @@ export function InvoicesPage() {
     { description: '', quantity: 1, rate: 0 },
   ]);
   const [serviceNotes, setServiceNotes] = useState('');
+  const [includeGst, setIncludeGst] = useState(true);
 
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
   const [editItems, setEditItems] = useState<ServiceItem[]>([]);
