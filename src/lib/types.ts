@@ -84,6 +84,7 @@ export interface WorkHour {
   start_time: string | null;
   end_time: string | null;
   break_minutes: number;
+  break_deducted: boolean;
   total_hours: number | null;
   hourly_rate: number | null;
   subtotal: number | null;
@@ -121,6 +122,8 @@ export interface InvoiceItem {
   id: string;
   user_id: string;
   invoice_id: string;
+  break_minutes: number | null;
+  break_deducted: boolean | null;
   work_hour_id: string | null;
   job_site_id: string | null;
   description: string | null;
