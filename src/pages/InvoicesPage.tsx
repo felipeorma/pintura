@@ -109,8 +109,9 @@ function getBusinessAddressLines(profile: Profile | null) {
   if (!profile) return [];
 
   const cityProvince = [profile.city, profile.province].filter(Boolean).join(', ');
+  const cityLine = [cityProvince, profile.postal_code].filter(Boolean).join(' ');
 
-  return [profile.home_address, cityProvince].filter(Boolean);
+  return [profile.home_address, cityLine].filter(Boolean);
 }
 
 const GST_RATE = 0.05;
