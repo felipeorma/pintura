@@ -604,7 +604,7 @@ export function generateInvoicePdf(
     <div class="container">
       <div class="header">
         <div>
-          <div class="eyebrow">Professional Invoice</div>
+          <div class="eyebrow">Professional Painting Services</div>
           <h1 class="invoice-title">INVOICE</h1>
           <p class="invoice-number">${escapeHtml(invoice.invoice_number)}</p>
         </div>
