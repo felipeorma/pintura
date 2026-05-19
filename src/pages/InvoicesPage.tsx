@@ -150,6 +150,7 @@ export function InvoicesPage() {
   const [editNotes, setEditNotes] = useState('');
   const [editDate, setEditDate] = useState('');
   const [editDueDate, setEditDueDate] = useState('');
+  const [editIncludeGst, setEditIncludeGst] = useState(true);
 
   const [previewInvoice, setPreviewInvoice] = useState<Invoice | null>(null);
   const [previewItems, setPreviewItems] = useState<InvoiceItem[]>([]);
