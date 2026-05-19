@@ -5,6 +5,16 @@ import type { Client } from '../lib/types';
 import { Plus, X, Users, Pencil, Archive, ArchiveRestore, Trash2, AlertCircle } from 'lucide-react';
 import { ConfirmDeleteModal } from '../components/ConfirmDeleteModal';
 
+type BillingInfo = {
+  address: string;
+  city: string;
+  province: string;
+  postal_code: string;
+};
+
+const BILLING_START = '[BILLING_ADDRESS]';
+const BILLING_END = '[/BILLING_ADDRESS]';
+
 export function ClientsPage() {
   const { user } = useAuth();
   const [clients, setClients] = useState<Client[]>([]);
@@ -90,11 +100,89 @@ export function ClientsPage() {
     return value.trim().toUpperCase();
   }
 
-  function formatClientAddress(client: Client) {
-    const cityProvince = [client.city, client.province].filter(Boolean).join(', ');
-    const cityLine = [cityProvince, client.postal_code].filter(Boolean).join(' ');
+  function cleanNotes(notes: string | null) {
+    if (!notes) return '';
 
-    return [client.address, cityLine].filter(Boolean).join(' • ');
+    return notes
+      .replace(/\[BILLING_ADDRESS\][\s\S]*?\[\/BILLING_ADDRESS\]/g, '')
+      .replace(/^Billing Address:.*$/gim, '')
+      .trim();
+  }
+
+  function buildBillingBlock(info: BillingInfo) {
+    const hasBilling = info.address || info.city || info.province || info.postal_code;
+
+    if (!hasBilling) return '';
+
+    return [
+      BILLING_START,
+      `address=${info.address}`,
+      `city=${info.city}`,
+      `province=${info.province}`,
+      `postal_code=${info.postal_code}`,
+      BILLING_END,
+    ].join('\n');
+  }
+
+  function parseBillingFromNotes(notes: string | null): BillingInfo {
+    const emptyBilling: BillingInfo = {
+      address: '',
+      city: '',
+      province: 'AB',
+      postal_code: '',
+    };
+
+    if (!notes) return emptyBilling;
+
+    const blockMatch = notes.match(/\[BILLING_ADDRESS\]([\s\S]*?)\[\/BILLING_ADDRESS\]/);
+
+    if (blockMatch?.[1]) {
+      const lines = blockMatch[1].split('\n');
+
+      const values = lines.reduce<Record<string, string>>((acc, line) => {
+        const [key, ...rest] = line.split('=');
+        if (!key) return acc;
+
+        acc[key.trim()] = rest.join('=').trim();
+        return acc;
+      }, {});
+
+      return {
+        address: values.address || '',
+        city: values.city || '',
+        province: values.province || 'AB',
+        postal_code: values.postal_code || '',
+      };
+    }
+
+    const legacyMatch = notes.match(/^Billing Address:\s*(.*)$/im);
+
+    if (legacyMatch?.[1]) {
+      return {
+        ...emptyBilling,
+        address: legacyMatch[1].trim(),
+      };
+    }
+
+    return emptyBilling;
+  }
+
+  function getBillingInfoFromClient(client: Client): BillingInfo {
+    const parsed = parseBillingFromNotes(client.notes);
+
+    return {
+      address: (client as any).address || parsed.address || '',
+      city: (client as any).city || parsed.city || '',
+      province: (client as any).province || parsed.province || 'AB',
+      postal_code: (client as any).postal_code || parsed.postal_code || '',
+    };
+  }
+
+  function formatBillingAddress(info: BillingInfo) {
+    const cityProvince = [info.city, info.province].filter(Boolean).join(', ');
+    const cityLine = [cityProvince, info.postal_code].filter(Boolean).join(' ');
+
+    return [info.address, cityLine].filter(Boolean).join(' • ');
   }
 
   function openCreateForm() {
@@ -122,17 +210,20 @@ export function ClientsPage() {
     const formattedPhone = formData.phone ? formatCanadianPhone(formData.phone) : '';
     const formattedPostalCode = formData.postal_code ? formatPostalCode(formData.postal_code) : '';
 
-    const billingAddressText = [
-      formData.address.trim(),
-      [formData.city.trim(), formData.province.trim().toUpperCase()].filter(Boolean).join(', '),
-      formattedPostalCode,
-    ].filter(Boolean).join(' ');
-    
-    const notesWithBilling = [
-      formData.notes.trim(),
-      billingAddressText ? `Billing Address: ${billingAddressText}` : '',
-    ].filter(Boolean).join('\n');
-    
+    const billingInfo: BillingInfo = {
+      address: formData.address.trim(),
+      city: formData.city.trim(),
+      province: formData.province.trim().toUpperCase() || 'AB',
+      postal_code: formattedPostalCode,
+    };
+
+    const visibleNotes = cleanNotes(formData.notes);
+    const billingBlock = buildBillingBlock(billingInfo);
+
+    const notesWithBilling = [visibleNotes, billingBlock]
+      .filter(Boolean)
+      .join('\n\n');
+
     const record = {
       user_id: user.id,
       name: formData.name.trim(),
@@ -153,9 +244,7 @@ export function ClientsPage() {
       : await supabase.from('clients').insert(record);
 
     if (error) {
-      setErrorMessage(
-        `${error.message}. If this mentions address, city, province, or postal_code, the migration has not been applied to the real Supabase database yet.`
-      );
+      setErrorMessage(error.message);
       setSaving(false);
       return;
     }
@@ -168,16 +257,18 @@ export function ClientsPage() {
   }
 
   function editClient(client: Client) {
+    const billingInfo = getBillingInfoFromClient(client);
+
     setFormData({
       name: client.name,
       contact_name: client.contact_name || '',
       phone: client.phone || '',
       email: client.email || '',
-      address: client.address || '',
-      city: client.city || '',
-      province: client.province || 'AB',
-      postal_code: client.postal_code || '',
-      notes: client.notes || '',
+      address: billingInfo.address,
+      city: billingInfo.city,
+      province: billingInfo.province || 'AB',
+      postal_code: billingInfo.postal_code,
+      notes: cleanNotes(client.notes),
     });
 
     setEditingId(client.id);
@@ -496,7 +587,8 @@ export function ClientsPage() {
           </div>
         ) : (
           clients.map(client => {
-            const address = formatClientAddress(client);
+            const billingInfo = getBillingInfoFromClient(client);
+            const address = formatBillingAddress(billingInfo);
 
             return (
               <div
