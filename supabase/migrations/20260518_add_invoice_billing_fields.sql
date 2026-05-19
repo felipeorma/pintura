@@ -15,3 +15,12 @@ add column if not exists show_business_address boolean not null default true;
 
 alter table public.invoices
 add column if not exists show_gst_number boolean not null default true;
+
+alter table public.work_hours
+add column if not exists break_deducted boolean not null default true;
+
+alter table public.invoice_items
+add column if not exists break_minutes integer;
+
+alter table public.invoice_items
+add column if not exists break_deducted boolean;
