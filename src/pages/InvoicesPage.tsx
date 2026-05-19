@@ -414,6 +414,7 @@ export function InvoicesPage() {
     setServiceItems([{ description: '', quantity: 1, rate: 0 }]);
     setServiceNotes('');
     setInvoiceMode('hours');
+    setIncludeGst(true);
   }
 
   async function deleteInvoice(inv: Invoice) {
