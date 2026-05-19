@@ -43,10 +43,33 @@ export function ClientsPage() {
     setLoading(false);
   }
 
+  function formatCanadianPhone(value: string) {
+    const cleaned = value.trim();
+
+    if (!cleaned) return '';
+
+    const digits = cleaned.replace(/\D/g, '');
+
+    let phoneDigits = digits;
+
+    if (digits.length === 11 && digits.startsWith('1')) {
+      phoneDigits = digits.slice(1);
+    }
+
+    if (phoneDigits.length !== 10) {
+      return cleaned;
+    }
+
+    const area = phoneDigits.slice(0, 3);
+    const prefix = phoneDigits.slice(3, 6);
+    const line = phoneDigits.slice(6, 10);
+
+    return `+1 (${area}) ${prefix}-${line}`;
+  }
+
   function formatClientAddress(client: Client) {
-    const cityLine = [client.city, client.province, client.postal_code]
-      .filter(Boolean)
-      .join(', ');
+    const cityProvince = [client.city, client.province].filter(Boolean).join(', ');
+    const cityLine = [cityProvince, client.postal_code].filter(Boolean).join(' ');
 
     return [client.address, cityLine].filter(Boolean).join(' • ');
   }
@@ -58,7 +81,7 @@ export function ClientsPage() {
       user_id: user!.id,
       name: formData.name,
       contact_name: formData.contact_name || null,
-      phone: formData.phone || null,
+      phone: formData.phone ? formatCanadianPhone(formData.phone) : null,
       email: formData.email || null,
       address: formData.address || null,
       city: formData.city || null,
@@ -217,7 +240,16 @@ export function ClientsPage() {
                   <input
                     type="tel"
                     value={formData.phone}
-                    onChange={e => setFormData(f => ({ ...f, phone: e.target.value }))}
+                    onChange={e =>
+                      setFormData(f => ({ ...f, phone: e.target.value }))
+                    }
+                    onBlur={e =>
+                      setFormData(f => ({
+                        ...f,
+                        phone: formatCanadianPhone(e.target.value),
+                      }))
+                    }
+                    placeholder="+1 (403) 923-1034"
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                   />
                 </div>
@@ -230,7 +262,9 @@ export function ClientsPage() {
                   <input
                     type="email"
                     value={formData.email}
-                    onChange={e => setFormData(f => ({ ...f, email: e.target.value }))}
+                    onChange={e =>
+                      setFormData(f => ({ ...f, email: e.target.value }))
+                    }
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                   />
                 </div>
@@ -324,7 +358,9 @@ export function ClientsPage() {
 
                 <textarea
                   value={formData.notes}
-                  onChange={e => setFormData(f => ({ ...f, notes: e.target.value }))}
+                  onChange={e =>
+                    setFormData(f => ({ ...f, notes: e.target.value }))
+                  }
                   rows={2}
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 />
