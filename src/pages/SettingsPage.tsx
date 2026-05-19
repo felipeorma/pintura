@@ -35,6 +35,7 @@ export function SettingsPage() {
       phone: profile.phone,
       city: profile.city,
       province: profile.province,
+      postal_code: (profile as any).postal_code,
       home_address: profile.home_address,
       business_number: profile.business_number,
       gst_enabled: profile.gst_enabled,
@@ -142,12 +143,29 @@ export function SettingsPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">City</label>
-                  <input type="text" value={profile.city || ''} onChange={e => update('city', e.target.value)} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+                  <input type="text" value={profile.city || ''} onChange={e => update('city', e.target.value)} placeholder="e.g. Calgary" className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Province</label>
-                  <input type="text" value={profile.province || ''} onChange={e => update('province', e.target.value)} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+                  <input type="text" value={profile.province || ''} onChange={e => update('province', e.target.value.toUpperCase())} placeholder="e.g. AB" maxLength={2} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
                 </div>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Postal Code</label>
+                <input
+                  type="text"
+                  value={(profile as any).postal_code || ''}
+                  onChange={e => update('postal_code', e.target.value.toUpperCase())}
+                  onBlur={e => {
+                    const clean = e.target.value.replace(/\s+/g, '').toUpperCase();
+                    if (/^[A-Z]\d[A-Z]\d[A-Z]\d$/.test(clean)) {
+                      update('postal_code', `${clean.slice(0, 3)} ${clean.slice(3)}`);
+                    }
+                  }}
+                  placeholder="e.g. T2Y 4J8"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                />
+                <p className="text-xs text-gray-400 mt-1">Shown on invoices and PDF under your business address.</p>
               </div>
             </section>
 
