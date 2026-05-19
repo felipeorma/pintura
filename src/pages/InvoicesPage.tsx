@@ -290,12 +290,12 @@ export function InvoicesPage() {
 
   async function createInvoiceFromHours() {
     if (selectedHours.size === 0) return;
-
+  
     const hours = uninvoicedHours.filter(h => selectedHours.has(h.id));
     const subtotal = hours.reduce((s, h) => s + (h.subtotal || 0), 0);
-    const gstAmount = hours.reduce((s, h) => s + (h.gst_amount || 0), 0);
+    const gstAmount = includeGst ? subtotal * 0.05 : 0;
     const totalAmount = subtotal + gstAmount;
-
+  
     const { data: invoice } = await supabase
       .from('invoices')
       .insert({
@@ -312,7 +312,7 @@ export function InvoicesPage() {
       })
       .select()
       .single();
-
+  
     if (invoice) {
       const items = hours.map(h => {
         const siteName = (h as any).job_sites?.site_name || 'Painting services';
@@ -320,7 +320,10 @@ export function InvoicesPage() {
           h.start_time && h.end_time
             ? ` (${h.start_time.slice(0, 5)} - ${h.end_time.slice(0, 5)})`
             : '';
-
+  
+        const itemSubtotal = h.subtotal || 0;
+        const itemGst = includeGst ? itemSubtotal * 0.05 : 0;
+  
         return {
           user_id: user!.id,
           invoice_id: invoice.id,
@@ -330,20 +333,20 @@ export function InvoicesPage() {
           work_date: h.work_date,
           hours: h.total_hours,
           rate: h.hourly_rate,
-          subtotal: h.subtotal,
-          gst_amount: h.gst_amount,
-          total_amount: (h.subtotal || 0) + (h.gst_amount || 0),
+          subtotal: itemSubtotal,
+          gst_amount: itemGst,
+          total_amount: itemSubtotal + itemGst,
         };
       });
-
+  
       await supabase.from('invoice_items').insert(items);
-
+  
       await supabase
         .from('work_hours')
         .update({ status: 'invoiced' })
         .in('id', Array.from(selectedHours));
     }
-
+  
     closeModal();
     loadData();
   }
