@@ -128,10 +128,6 @@ export function ClientsPage() {
       contact_name: formData.contact_name.trim() || null,
       phone: formattedPhone || null,
       email: formData.email.trim() || null,
-      address: formData.address.trim() || null,
-      city: formData.city.trim() || null,
-      province: formData.province.trim().toUpperCase() || null,
-      postal_code: formattedPostalCode || null,
       notes: formData.notes.trim() || null,
     };
 
