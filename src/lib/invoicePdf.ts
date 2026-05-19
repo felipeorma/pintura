@@ -112,8 +112,9 @@ function formatAddressLines(info: BillingInfo) {
 
 function getBusinessAddressLines(profile: Profile) {
   const cityProvince = [profile.city, profile.province].filter(Boolean).join(', ');
+  const cityLine = [cityProvince, profile.postal_code].filter(Boolean).join(' ');
 
-  return [profile.home_address, cityProvince].filter(Boolean);
+  return [profile.home_address, cityLine].filter(Boolean);
 }
 
 export function generateInvoicePdf(
