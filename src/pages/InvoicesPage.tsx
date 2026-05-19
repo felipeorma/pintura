@@ -353,14 +353,14 @@ export function InvoicesPage() {
 
   async function createInvoiceFromService() {
     const validItems = serviceItems.filter(i => i.description && i.rate > 0);
-
+  
     if (validItems.length === 0 || !selectedClient) return;
-
-    const gstRate = getGstRate(profile);
+  
+    const gstRate = includeGst ? 0.05 : 0;
     const subtotal = validItems.reduce((s, i) => s + i.quantity * i.rate, 0);
     const gstAmount = subtotal * gstRate;
     const totalAmount = subtotal + gstAmount;
-
+  
     const { data: invoice } = await supabase
       .from('invoices')
       .insert({
@@ -378,25 +378,30 @@ export function InvoicesPage() {
       })
       .select()
       .single();
-
+  
     if (invoice) {
-      const items = validItems.map(i => ({
-        user_id: user!.id,
-        invoice_id: invoice.id,
-        work_hour_id: null,
-        job_site_id: null,
-        description: i.description,
-        work_date: format(new Date(), 'yyyy-MM-dd'),
-        hours: i.quantity,
-        rate: i.rate,
-        subtotal: i.quantity * i.rate,
-        gst_amount: i.quantity * i.rate * gstRate,
-        total_amount: i.quantity * i.rate * (1 + gstRate),
-      }));
-
+      const items = validItems.map(i => {
+        const itemSubtotal = i.quantity * i.rate;
+        const itemGst = itemSubtotal * gstRate;
+  
+        return {
+          user_id: user!.id,
+          invoice_id: invoice.id,
+          work_hour_id: null,
+          job_site_id: null,
+          description: i.description,
+          work_date: format(new Date(), 'yyyy-MM-dd'),
+          hours: i.quantity,
+          rate: i.rate,
+          subtotal: itemSubtotal,
+          gst_amount: itemGst,
+          total_amount: itemSubtotal + itemGst,
+        };
+      });
+  
       await supabase.from('invoice_items').insert(items);
     }
-
+  
     closeModal();
     loadData();
   }
