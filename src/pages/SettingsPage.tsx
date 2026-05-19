@@ -32,7 +32,7 @@ export function SettingsPage() {
       full_name: profile.full_name,
       business_name: profile.business_name,
       email: profile.email,
-      phone: profile.phone,
+      phone: profile.phone ? formatPhoneNumber(profile.phone) : null,
       city: profile.city,
       province: profile.province,
       postal_code: (profile as any).postal_code,
