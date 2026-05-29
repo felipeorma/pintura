@@ -208,17 +208,29 @@ export function generateInvoicePdf(
   iframeDoc.write(html);
   iframeDoc.close();
 
-  iframe.onload = () => {
+  const triggerPrint = () => {
     setTimeout(() => {
-      iframe.contentWindow?.print();
+      const iframeWin = iframe.contentWindow;
+      if (!iframeWin) return;
+
+      // Calcula cuánto ocupa el contenido vs la página (letter = 816px a 96dpi)
+      const pageHeightPx = 1056; // letter portrait a 96dpi
+      const contentHeight = iframeDoc.body.scrollHeight;
+
+      if (contentHeight > pageHeightPx) {
+        const scale = pageHeightPx / contentHeight;
+        // Inyecta el scale como CSS variable
+        iframeDoc.documentElement.style.setProperty('--print-scale', String(scale.toFixed(4)));
+      }
+
+      iframeWin.print();
       setTimeout(() => document.body.removeChild(iframe), 1000);
-    }, 250);
+    }, 350);
   };
 
+  iframe.onload = triggerPrint;
+
   if (iframeDoc.readyState === 'complete') {
-    setTimeout(() => {
-      iframe.contentWindow?.print();
-      setTimeout(() => document.body.removeChild(iframe), 1000);
-    }, 250);
+    triggerPrint();
   }
 }
