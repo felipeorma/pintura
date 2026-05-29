@@ -218,7 +218,12 @@ export function generateInvoicePdf(
 
   const triggerPrint = () => {
     setTimeout(() => {
-      iframe.contentWindow?.print();
+      const win = iframe.contentWindow;
+      if (!win) return;
+      const clientName = client.name.replace(/[^a-zA-Z0-9 ]/g, '').trim();
+      const date = formatDate(invoice.invoice_date);
+      win.document.title = `Felipe Invoice - ${clientName} - ${date}`;
+      win.print();
       setTimeout(() => document.body.removeChild(iframe), 1000);
     }, 300);
   };
