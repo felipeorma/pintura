@@ -291,7 +291,7 @@ export function ExpensesPage() {
                       />
                     </a>
                   ) : (
-                    
+                    <a
                       href={previewExpense.receipt_url}
                       target="_blank"
                       rel="noopener noreferrer"
