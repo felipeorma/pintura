@@ -25,27 +25,25 @@ function ReceiptPreview({ path, className }: { path: string; className?: string 
 
   if (isImage) {
     return (
-      <a href={url} target="_blank" rel="noopener noreferrer">
+      <button onClick={() => window.open(url, '_blank')} className="w-full text-left">
         <img
           src={url}
           alt="Receipt"
           className={className || 'w-full rounded-lg border border-gray-200 dark:border-gray-700 hover:opacity-90 transition-opacity'}
         />
-      </a>
+      </button>
     );
   }
 
   return (
-    <a
-      href={url}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="flex items-center gap-2 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg text-sm text-teal-600 dark:text-teal-400 hover:underline"
+    <button
+      onClick={() => window.open(url, '_blank')}
+      className="flex items-center gap-2 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg text-sm text-teal-600 dark:text-teal-400 hover:underline w-full"
     >
       <FileText className="w-4 h-4" />
       View Receipt
       <ExternalLink className="w-3 h-3 ml-auto" />
-    </a>
+    </button>
   );
 }
 
