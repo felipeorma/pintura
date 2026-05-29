@@ -5,6 +5,8 @@ import type { Expense, JobSite, Client } from '../lib/types';
 import { EXPENSE_CATEGORY_DATA, PAYMENT_METHODS, TAX_CONFIDENCE_OPTIONS } from '../lib/expenseData';
 import { Plus, X, Receipt, AlertTriangle, Upload, ExternalLink, FileText, Pencil } from 'lucide-react';
 import { format } from 'date-fns';
+import { getFileUrl } from '../lib/storage';
+
 
 export function ExpensesPage() {
   const { user } = useAuth();
@@ -18,6 +20,15 @@ export function ExpensesPage() {
   const [uploading, setUploading] = useState(false);
   const [previewExpense, setPreviewExpense] = useState<Expense | null>(null);
 
+  const [signedUrl, setSignedUrl] = useState<string | null>(null);
+    
+    useEffect(() => {
+      if (previewExpense?.receipt_url) {
+        getFileUrl(previewExpense.receipt_url, 'receipts').then(setSignedUrl);
+      } else {
+        setSignedUrl(null);
+      }
+    }, [previewExpense]);
   const [formData, setFormData] = useState({
     expense_date: format(new Date(), 'yyyy-MM-dd'),
     vendor: '',
