@@ -79,6 +79,8 @@ export function DocumentsPage() {
   const [showForm, setShowForm] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [filterType, setFilterType] = useState('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
 
   const [formData, setFormData] = useState({
     document_type: '',
@@ -163,7 +165,13 @@ export function DocumentsPage() {
     (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
   );
 
-  const filtered = filterType === 'all' ? allItems : allItems.filter(i => i.label === filterType);
+  const filtered = allItems.filter(i => {
+    if (filterType !== 'all' && i.label !== filterType) return false;
+    const d = i.date.includes('T') ? i.date.split('T')[0] : i.date;
+    if (dateFrom && d < dateFrom) return false;
+    if (dateTo && d > dateTo) return false;
+    return true;
+  });
 
   const labelColors: Record<string, string> = {
     'Receipt': 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300',
@@ -196,8 +204,8 @@ export function DocumentsPage() {
         </button>
       </div>
 
-      {/* Filters */}
-      <div className="flex gap-2 mb-4 overflow-x-auto">
+      {/* Type filter */}
+      <div className="flex gap-2 mb-3 overflow-x-auto">
         <button
           onClick={() => setFilterType('all')}
           className={`px-3 py-1.5 text-sm font-medium rounded-lg whitespace-nowrap ${filterType === 'all' ? 'bg-teal-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700'}`}
@@ -217,6 +225,32 @@ export function DocumentsPage() {
             </button>
           );
         })}
+      </div>
+
+      {/* Date range filter */}
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">Date:</span>
+        <input
+          type="date"
+          value={dateFrom}
+          onChange={e => setDateFrom(e.target.value)}
+          className="px-2 py-1.5 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300"
+        />
+        <span className="text-xs text-gray-400">→</span>
+        <input
+          type="date"
+          value={dateTo}
+          onChange={e => setDateTo(e.target.value)}
+          className="px-2 py-1.5 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300"
+        />
+        {(dateFrom || dateTo) && (
+          <button
+            onClick={() => { setDateFrom(''); setDateTo(''); }}
+            className="px-2 py-1.5 text-xs text-red-500 hover:text-red-700 border border-red-200 dark:border-red-900/40 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+          >
+            Clear
+          </button>
+        )}
       </div>
 
       {/* Upload Modal */}
@@ -286,7 +320,7 @@ export function DocumentsPage() {
         {filtered.length === 0 ? (
           <div className="text-center py-12 text-gray-400 dark:text-gray-500">
             <FolderOpen className="w-10 h-10 mx-auto mb-2 opacity-50" />
-            <p>No documents found</p>
+            <p>No documents found{(dateFrom || dateTo) ? ' for this date range' : ''}</p>
           </div>
         ) : filtered.map(item => {
           const bucket = getBucket(item.label);
