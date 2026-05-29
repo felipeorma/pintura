@@ -6,6 +6,7 @@ import type { WorkHour, Client, JobSite, Profile } from '../lib/types';
 import { Plus, X, Clock } from 'lucide-react';
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from 'date-fns';
 
+type DateView = 'week' | 'month' | 'custom';
 type InvoiceStatus = 'draft' | 'sent' | 'paid' | 'overdue';
 type WorkHourDisplayStatus = 'not_invoiced' | 'invoiced' | InvoiceStatus;
 
@@ -32,15 +33,24 @@ interface WorkHourInvoiceLink {
 
 export function WorkHoursPage() {
   const { user } = useAuth();
+
   const [entries, setEntries] = useState<WorkHourWithRelations[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [jobSites, setJobSites] = useState<JobSite[]>([]);
   const [profile, setProfile] = useState<Profile | null>(null);
+
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [view, setView] = useState<'week' | 'month'>('week');
+  const [view, setView] = useState<DateView>('week');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  const [dateFrom, setDateFrom] = useState(
+    format(startOfWeek(new Date(), { weekStartsOn: 1 }), 'yyyy-MM-dd')
+  );
+  const [dateTo, setDateTo] = useState(
+    format(endOfWeek(new Date(), { weekStartsOn: 1 }), 'yyyy-MM-dd')
+  );
 
   const [formData, setFormData] = useState({
     work_date: format(new Date(), 'yyyy-MM-dd'),
@@ -58,10 +68,11 @@ export function WorkHoursPage() {
 
   useEffect(() => {
     if (user) loadData();
-  }, [user, view]);
+  }, [user, view, dateFrom, dateTo]);
 
   function getGstRate() {
     if (!profile?.gst_enabled) return 0;
+
     const rawRate = profile.gst_rate || 5;
     return rawRate > 1 ? rawRate / 100 : rawRate;
   }
@@ -70,20 +81,33 @@ export function WorkHoursPage() {
     return Array.isArray(link.invoices) ? link.invoices[0] : link.invoices;
   }
 
+  function getDateRange() {
+    const now = new Date();
+
+    if (view === 'week') {
+      return {
+        dateStart: format(startOfWeek(now, { weekStartsOn: 1 }), 'yyyy-MM-dd'),
+        dateEnd: format(endOfWeek(now, { weekStartsOn: 1 }), 'yyyy-MM-dd'),
+      };
+    }
+
+    if (view === 'month') {
+      return {
+        dateStart: format(startOfMonth(now), 'yyyy-MM-dd'),
+        dateEnd: format(endOfMonth(now), 'yyyy-MM-dd'),
+      };
+    }
+
+    return {
+      dateStart: dateFrom,
+      dateEnd: dateTo,
+    };
+  }
+
   async function loadData() {
     setLoading(true);
 
-    const now = new Date();
-    let dateStart: string;
-    let dateEnd: string;
-
-    if (view === 'week') {
-      dateStart = format(startOfWeek(now, { weekStartsOn: 1 }), 'yyyy-MM-dd');
-      dateEnd = format(endOfWeek(now, { weekStartsOn: 1 }), 'yyyy-MM-dd');
-    } else {
-      dateStart = format(startOfMonth(now), 'yyyy-MM-dd');
-      dateEnd = format(endOfMonth(now), 'yyyy-MM-dd');
-    }
+    const { dateStart, dateEnd } = getDateRange();
 
     const [hoursRes, clientsRes, sitesRes, profileRes] = await Promise.all([
       supabase
@@ -93,18 +117,21 @@ export function WorkHoursPage() {
         .gte('work_date', dateStart)
         .lte('work_date', dateEnd)
         .order('work_date', { ascending: false }),
+
       supabase
         .from('clients')
         .select('*')
         .eq('user_id', user!.id)
         .eq('active', true)
         .order('name'),
+
       supabase
         .from('job_sites')
         .select('*')
         .eq('user_id', user!.id)
         .eq('active', true)
         .order('site_name'),
+
       supabase
         .from('profiles')
         .select('*')
@@ -115,7 +142,10 @@ export function WorkHoursPage() {
     const hours = (hoursRes.data || []) as WorkHourWithRelations[];
     const hourIds = hours.map(h => h.id);
 
-    let invoiceByHourId: Record<string, { status: WorkHourDisplayStatus; invoiceNumber: string | null }> = {};
+    let invoiceByHourId: Record<
+      string,
+      { status: WorkHourDisplayStatus; invoiceNumber: string | null }
+    > = {};
 
     if (hourIds.length > 0) {
       const { data: invoiceLinks } = await supabase
@@ -157,6 +187,7 @@ export function WorkHoursPage() {
 
     if (profileRes.data) {
       setProfile(profileRes.data);
+
       if (profileRes.data.default_hourly_rate && !formData.hourly_rate) {
         setFormData(f => ({
           ...f,
@@ -173,7 +204,10 @@ export function WorkHoursPage() {
 
     const [sh, sm] = formData.start_time.split(':').map(Number);
     const [eh, em] = formData.end_time.split(':').map(Number);
-    const totalMinutes = eh * 60 + em - (sh * 60 + sm) - formData.break_minutes;
+
+    const startMinutes = sh * 60 + sm;
+    const endMinutes = eh * 60 + em;
+    const totalMinutes = endMinutes - startMinutes - formData.break_minutes;
 
     return Math.max(0, totalMinutes / 60);
   }
@@ -234,7 +268,7 @@ export function WorkHoursPage() {
       job_site_id: entry.job_site_id || '',
       start_time: entry.start_time || '07:00',
       end_time: entry.end_time || '15:30',
-      break_minutes: entry.break_minutes,
+      break_minutes: entry.break_minutes || 0,
       hourly_rate: entry.hourly_rate || 0,
       notes: entry.notes || '',
     });
@@ -265,6 +299,8 @@ export function WorkHoursPage() {
     setShowNewSite(false);
   }
 
+  const breakIncluded = formData.break_minutes > 0;
+
   const filtered =
     filterStatus === 'all'
       ? entries
@@ -272,7 +308,10 @@ export function WorkHoursPage() {
 
   const totalHoursDisplay = filtered.reduce((s, e) => s + (e.total_hours || 0), 0);
   const totalAmountDisplay = filtered.reduce((s, e) => s + (e.subtotal || 0), 0);
-  const formGstAmount = calculateHours() * formData.hourly_rate * getGstRate();
+
+  const formSubtotal = calculateHours() * formData.hourly_rate;
+  const formGstAmount = formSubtotal * getGstRate();
+  const formTotal = formSubtotal + formGstAmount;
 
   if (loading) {
     return (
@@ -286,6 +325,7 @@ export function WorkHoursPage() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Work Hours</h1>
+
         <button
           onClick={() => {
             resetForm();
@@ -308,6 +348,7 @@ export function WorkHoursPage() {
           >
             Week
           </button>
+
           <button
             onClick={() => setView('month')}
             className={`px-3 py-1.5 text-sm font-medium ${
@@ -316,7 +357,34 @@ export function WorkHoursPage() {
           >
             Month
           </button>
+
+          <button
+            onClick={() => setView('custom')}
+            className={`px-3 py-1.5 text-sm font-medium ${
+              view === 'custom' ? 'bg-teal-600 text-white' : 'text-gray-600 dark:text-gray-400'
+            }`}
+          >
+            Custom
+          </button>
         </div>
+
+        {view === 'custom' && (
+          <div className="flex gap-2">
+            <input
+              type="date"
+              value={dateFrom}
+              onChange={e => setDateFrom(e.target.value)}
+              className="px-3 py-1.5 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300"
+            />
+
+            <input
+              type="date"
+              value={dateTo}
+              onChange={e => setDateTo(e.target.value)}
+              className="px-3 py-1.5 text-sm border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300"
+            />
+          </div>
+        )}
 
         <select
           value={filterStatus}
@@ -329,6 +397,7 @@ export function WorkHoursPage() {
           <option value="sent">Sent Invoice</option>
           <option value="paid">Paid</option>
           <option value="overdue">Overdue</option>
+          <option value="invoiced">Invoiced</option>
         </select>
       </div>
 
@@ -337,6 +406,7 @@ export function WorkHoursPage() {
           <Clock className="w-3.5 h-3.5 inline mr-1" />
           {totalHoursDisplay.toFixed(1)} hrs
         </span>
+
         <span className="text-gray-600 dark:text-gray-400">
           ${totalAmountDisplay.toFixed(2)} earned
         </span>
@@ -349,14 +419,21 @@ export function WorkHoursPage() {
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
                 {editingId ? 'Edit Entry' : 'Add Work Hours'}
               </h2>
-              <button onClick={() => setShowForm(false)} className="p-1 text-gray-400 hover:text-gray-600">
+
+              <button
+                onClick={() => setShowForm(false)}
+                className="p-1 text-gray-400 hover:text-gray-600"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <form onSubmit={handleSubmit} className="p-4 space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Date</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Date
+                </label>
+
                 <input
                   type="date"
                   value={formData.work_date}
@@ -367,7 +444,10 @@ export function WorkHoursPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Client</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Client
+                </label>
+
                 <select
                   value={formData.client_id}
                   onChange={e => setFormData(f => ({ ...f, client_id: e.target.value }))}
@@ -375,13 +455,18 @@ export function WorkHoursPage() {
                 >
                   <option value="">Select client...</option>
                   {clients.map(c => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
                   ))}
                 </select>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Job Site</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Job Site
+                </label>
+
                 <select
                   value={formData.job_site_id}
                   onChange={e => setFormData(f => ({ ...f, job_site_id: e.target.value }))}
@@ -389,7 +474,9 @@ export function WorkHoursPage() {
                 >
                   <option value="">Select job site...</option>
                   {jobSites.map(s => (
-                    <option key={s.id} value={s.id}>{s.site_name}</option>
+                    <option key={s.id} value={s.id}>
+                      {s.site_name}
+                    </option>
                   ))}
                 </select>
 
@@ -410,10 +497,20 @@ export function WorkHoursPage() {
                       placeholder="Site name"
                       className="flex-1 px-2 py-1.5 text-sm border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                     />
-                    <button type="button" onClick={addQuickSite} className="px-2 py-1.5 text-xs bg-teal-600 text-white rounded-lg">
+
+                    <button
+                      type="button"
+                      onClick={addQuickSite}
+                      className="px-2 py-1.5 text-xs bg-teal-600 text-white rounded-lg"
+                    >
                       Add
                     </button>
-                    <button type="button" onClick={() => setShowNewSite(false)} className="px-2 py-1.5 text-xs text-gray-500">
+
+                    <button
+                      type="button"
+                      onClick={() => setShowNewSite(false)}
+                      className="px-2 py-1.5 text-xs text-gray-500"
+                    >
                       Cancel
                     </button>
                   </div>
@@ -422,7 +519,10 @@ export function WorkHoursPage() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Start</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    Start
+                  </label>
+
                   <input
                     type="time"
                     value={formData.start_time}
@@ -430,8 +530,12 @@ export function WorkHoursPage() {
                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                   />
                 </div>
+
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">End</label>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                    End
+                  </label>
+
                   <input
                     type="time"
                     value={formData.end_time}
@@ -441,49 +545,83 @@ export function WorkHoursPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <label className="flex items-center justify-between rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-700/40 px-3 py-2 cursor-pointer">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Break (min)</label>
-                  <input
-                    type="number"
-                    value={formData.break_minutes}
-                    onChange={e => setFormData(f => ({ ...f, break_minutes: parseInt(e.target.value) || 0 }))}
-                    min={0}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                  />
+                  <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    Include 30 min break
+                  </p>
+                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                    When checked, 30 minutes are deducted from total hours.
+                  </p>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Rate ($/hr)</label>
-                  <input
-                    type="number"
-                    value={formData.hourly_rate}
-                    onChange={e => setFormData(f => ({ ...f, hourly_rate: parseFloat(e.target.value) || 0 }))}
-                    min={0}
-                    step={0.01}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                  />
-                </div>
+
+                <input
+                  type="checkbox"
+                  checked={breakIncluded}
+                  onChange={e =>
+                    setFormData(f => ({
+                      ...f,
+                      break_minutes: e.target.checked ? 30 : 0,
+                    }))
+                  }
+                  className="h-4 w-4 rounded border-gray-300 text-teal-600 focus:ring-teal-500"
+                />
+              </label>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Rate ($/hr)
+                </label>
+
+                <input
+                  type="number"
+                  value={formData.hourly_rate}
+                  onChange={e =>
+                    setFormData(f => ({
+                      ...f,
+                      hourly_rate: parseFloat(e.target.value) || 0,
+                    }))
+                  }
+                  min={0}
+                  step={0.01}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                />
               </div>
 
-              <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 text-sm">
+              <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 text-sm space-y-1">
+                <div className="flex justify-between text-gray-600 dark:text-gray-400">
+                  <span>Break:</span>
+                  <span className="font-medium">{formData.break_minutes} min</span>
+                </div>
+
                 <div className="flex justify-between text-gray-600 dark:text-gray-400">
                   <span>Hours:</span>
                   <span className="font-medium">{calculateHours().toFixed(2)}</span>
                 </div>
+
                 <div className="flex justify-between text-gray-600 dark:text-gray-400">
                   <span>Subtotal:</span>
-                  <span className="font-medium">${(calculateHours() * formData.hourly_rate).toFixed(2)}</span>
+                  <span className="font-medium">${formSubtotal.toFixed(2)}</span>
                 </div>
+
                 {profile?.gst_enabled && (
                   <div className="flex justify-between text-gray-600 dark:text-gray-400">
-                    <span>GST ({((getGstRate() || 0.05) * 100).toFixed(0)}%):</span>
+                    <span>GST ({(getGstRate() * 100).toFixed(0)}%):</span>
                     <span className="font-medium">${formGstAmount.toFixed(2)}</span>
                   </div>
                 )}
+
+                <div className="flex justify-between font-semibold text-gray-900 dark:text-white pt-1 border-t border-gray-200 dark:border-gray-600">
+                  <span>Total:</span>
+                  <span>${formTotal.toFixed(2)}</span>
+                </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Notes</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Notes
+                </label>
+
                 <textarea
                   value={formData.notes}
                   onChange={e => setFormData(f => ({ ...f, notes: e.target.value }))}
@@ -492,7 +630,10 @@ export function WorkHoursPage() {
                 />
               </div>
 
-              <button type="submit" className="w-full py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-medium rounded-lg transition-colors">
+              <button
+                type="submit"
+                className="w-full py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-medium rounded-lg transition-colors"
+              >
                 {editingId ? 'Update' : 'Save Entry'}
               </button>
             </form>
@@ -519,10 +660,18 @@ export function WorkHoursPage() {
                     <span className="text-sm font-medium text-gray-900 dark:text-white">
                       {format(new Date(entry.work_date + 'T00:00'), 'EEE, MMM d')}
                     </span>
+
                     <StatusBadge status={entry.invoiceStatus || entry.status} />
+
                     {entry.invoiceNumber && (
                       <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400">
                         {entry.invoiceNumber}
+                      </span>
+                    )}
+
+                    {(entry.break_minutes || 0) > 0 && (
+                      <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-300">
+                        Break {entry.break_minutes}m
                       </span>
                     )}
                   </div>
@@ -537,6 +686,7 @@ export function WorkHoursPage() {
                   <p className="text-sm font-semibold text-gray-900 dark:text-white">
                     {entry.total_hours?.toFixed(1)}h
                   </p>
+
                   <p className="text-xs text-gray-500 dark:text-gray-400">
                     ${entry.subtotal?.toFixed(2)}
                   </p>
