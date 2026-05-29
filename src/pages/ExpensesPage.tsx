@@ -7,6 +7,44 @@ import { Plus, X, Receipt, AlertTriangle, Upload, ExternalLink, FileText, Pencil
 import { format } from 'date-fns';
 import { getFileUrl } from '../lib/storage';
 
+function ReceiptPreview({ path, className }: { path: string; className?: string }) {
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    getFileUrl(path, 'receipts').then(setUrl);
+  }, [path]);
+
+  if (!url) return (
+    <div className="flex items-center gap-2 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg text-sm text-gray-400">
+      <FileText className="w-4 h-4" /> Loading...
+    </div>
+  );
+
+  const isImage = /\.(jpg|jpeg|png|gif|webp|heic)/i.test(path);
+
+  if (isImage) {
+    return (
+      <button onClick={() => window.open(url, '_blank')} className="w-full text-left">
+        <img
+          src={url}
+          alt="Receipt"
+          className={className || 'w-full rounded-lg border border-gray-200 dark:border-gray-700 hover:opacity-90 transition-opacity'}
+        />
+      </button>
+    );
+  }
+
+  return (
+    <button
+      onClick={() => window.open(url, '_blank')}
+      className="flex items-center gap-2 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg text-sm text-teal-600 dark:text-teal-400 hover:underline w-full"
+    >
+      <FileText className="w-4 h-4" />
+      View Receipt
+      <ExternalLink className="w-3 h-3 ml-auto" />
+    </button>
+  );
+}
 
 export function ExpensesPage() {
   const { user } = useAuth();
@@ -20,15 +58,6 @@ export function ExpensesPage() {
   const [uploading, setUploading] = useState(false);
   const [previewExpense, setPreviewExpense] = useState<Expense | null>(null);
 
-  const [signedUrl, setSignedUrl] = useState<string | null>(null);
-    
-    useEffect(() => {
-      if (previewExpense?.receipt_url) {
-        getFileUrl(previewExpense.receipt_url, 'receipts').then(setSignedUrl);
-      } else {
-        setSignedUrl(null);
-      }
-    }, [previewExpense]);
   const [formData, setFormData] = useState({
     expense_date: format(new Date(), 'yyyy-MM-dd'),
     vendor: '',
@@ -47,13 +76,6 @@ export function ExpensesPage() {
   });
 
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
-
-  function getFileType(url: string): 'image' | 'pdf' | 'other' {
-    const lower = url.toLowerCase();
-    if (/\.(jpg|jpeg|png|gif|webp|heic)/.test(lower)) return 'image';
-    if (/\.pdf/.test(lower)) return 'pdf';
-    return 'other';
-  }
 
   useEffect(() => {
     if (user) loadData();
@@ -106,7 +128,6 @@ export function ExpensesPage() {
       setUploading(true);
       const filePath = `${user!.id}/${Date.now()}-${receiptFile.name}`;
       await supabase.storage.from('receipts').upload(filePath, receiptFile);
-      // Guardamos el path, no la URL pública
       receiptUrl = filePath;
       setUploading(false);
     }
@@ -116,7 +137,9 @@ export function ExpensesPage() {
       expense_date: formData.expense_date,
       vendor: formData.vendor || null,
       category: formData.category || null,
-      description: formData.subcategory ? `${formData.subcategory}${formData.description ? ' - ' + formData.description : ''}` : formData.description || null,
+      description: formData.subcategory
+        ? `${formData.subcategory}${formData.description ? ' - ' + formData.description : ''}`
+        : formData.description || null,
       job_site_id: formData.job_site_id || null,
       client_id: formData.client_id || null,
       subtotal_before_gst: formData.subtotal_before_gst,
@@ -189,16 +212,25 @@ export function ExpensesPage() {
     return { label: 'Clear', color: 'text-emerald-600 dark:text-emerald-400' };
   };
 
-  if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-2 border-teal-600 border-t-transparent rounded-full" /></div>;
+  if (loading) return (
+    <div className="flex items-center justify-center h-64">
+      <div className="animate-spin w-8 h-8 border-2 border-teal-600 border-t-transparent rounded-full" />
+    </div>
+  );
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Expenses</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Total: ${totalExpenses.toFixed(2)} | Deductible: ${totalDeductible.toFixed(2)}</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            Total: ${totalExpenses.toFixed(2)} | Deductible: ${totalDeductible.toFixed(2)}
+          </p>
         </div>
-        <button onClick={() => { resetForm(); setEditingId(null); setShowForm(true); }} className="flex items-center gap-1.5 px-3 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium rounded-lg transition-colors">
+        <button
+          onClick={() => { resetForm(); setEditingId(null); setShowForm(true); }}
+          className="flex items-center gap-1.5 px-3 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium rounded-lg transition-colors"
+        >
           <Plus className="w-4 h-4" /> Add Expense
         </button>
       </div>
@@ -217,23 +249,31 @@ export function ExpensesPage() {
           <div className="bg-white dark:bg-gray-800 rounded-xl w-full max-w-md max-h-[90vh] overflow-y-auto shadow-xl">
             <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Expense Details</h2>
-              <button onClick={() => setPreviewExpense(null)} className="p-1 text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+              <button onClick={() => setPreviewExpense(null)} className="p-1 text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
             </div>
             <div className="p-4 space-y-4">
 
-              {/* Title */}
               <div>
-                <p className="text-xl font-bold text-gray-900 dark:text-white">{previewExpense.vendor || previewExpense.category || 'Expense'}</p>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{format(new Date(previewExpense.expense_date + 'T00:00'), 'MMMM d, yyyy')}</p>
+                <p className="text-xl font-bold text-gray-900 dark:text-white">
+                  {previewExpense.vendor || previewExpense.category || 'Expense'}
+                </p>
+                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                  {format(new Date(previewExpense.expense_date + 'T00:00'), 'MMMM d, yyyy')}
+                </p>
                 {previewExpense.category && (
-                  <p className="text-sm text-gray-500 dark:text-gray-400">{previewExpense.category}{previewExpense.description ? ` • ${previewExpense.description}` : ''}</p>
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    {previewExpense.category}{previewExpense.description ? ` • ${previewExpense.description}` : ''}
+                  </p>
                 )}
-                {previewExpense.job_sites && (
-                  <p className="text-sm text-gray-500 dark:text-gray-400">Job Site: {(previewExpense as any).job_sites?.site_name}</p>
+                {(previewExpense as any).job_sites?.site_name && (
+                  <p className="text-sm text-gray-500 dark:text-gray-400">
+                    Job Site: {(previewExpense as any).job_sites.site_name}
+                  </p>
                 )}
               </div>
 
-              {/* Amounts */}
               <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 space-y-2">
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500 dark:text-gray-400">Before GST</span>
@@ -249,7 +289,6 @@ export function ExpensesPage() {
                 </div>
               </div>
 
-              {/* Business info */}
               <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 space-y-2">
                 <div className="flex justify-between text-sm">
                   <span className="text-gray-500 dark:text-gray-400">Business Use</span>
@@ -265,7 +304,6 @@ export function ExpensesPage() {
                 </div>
               </div>
 
-              {/* Payment + Tax status */}
               <div className="flex gap-3">
                 {(previewExpense as any).payment_method && (
                   <div className="flex-1 bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
@@ -281,7 +319,6 @@ export function ExpensesPage() {
                 </div>
               </div>
 
-              {/* Notes */}
               {previewExpense.notes && (
                 <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
                   <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Notes</p>
@@ -289,34 +326,14 @@ export function ExpensesPage() {
                 </div>
               )}
 
-              {/* Receipt */}
+              {/* Receipt — signed URL via ReceiptPreview */}
               {previewExpense.receipt_url && (
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Receipt</p>
-                  {getFileType(previewExpense.receipt_url) === 'image' ? (
-                    <a href={previewExpense.receipt_url} target="_blank" rel="noopener noreferrer">
-                      <img
-                        src={previewExpense.receipt_url}
-                        alt="Receipt"
-                        className="w-full rounded-lg border border-gray-200 dark:border-gray-700 hover:opacity-90 transition-opacity"
-                      />
-                    </a>
-                  ) : (
-                    <a
-                      href={previewExpense.receipt_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center gap-2 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg text-sm text-teal-600 dark:text-teal-400 hover:underline"
-                    >
-                      <FileText className="w-4 h-4" />
-                      View Receipt
-                      <ExternalLink className="w-3 h-3 ml-auto" />
-                    </a>
-                  )}
+                  <ReceiptPreview path={previewExpense.receipt_url} />
                 </div>
               )}
 
-              {/* Buttons */}
               <div className="flex gap-3 pt-2">
                 <button
                   onClick={() => setPreviewExpense(null)}
@@ -341,10 +358,15 @@ export function ExpensesPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
           <div className="bg-white dark:bg-gray-800 rounded-xl w-full max-w-md max-h-[90vh] overflow-y-auto shadow-xl">
             <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{editingId ? 'Edit Expense' : 'Add Expense'}</h2>
-              <button onClick={() => setShowForm(false)} className="p-1 text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                {editingId ? 'Edit Expense' : 'Add Expense'}
+              </h2>
+              <button onClick={() => setShowForm(false)} className="p-1 text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
             </div>
             <form onSubmit={handleSubmit} className="p-4 space-y-4">
+
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">What type of expense is this?</label>
                 <select value={formData.category} onChange={e => onCategoryChange(e.target.value)} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
@@ -437,44 +459,30 @@ export function ExpensesPage() {
 
               <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 text-sm space-y-1">
                 <div className="flex justify-between text-gray-600 dark:text-gray-400">
-                  <span>Total paid:</span><span className="font-medium">${(formData.subtotal_before_gst + formData.gst_paid).toFixed(2)}</span>
+                  <span>Total paid:</span>
+                  <span className="font-medium">${(formData.subtotal_before_gst + formData.gst_paid).toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between text-gray-600 dark:text-gray-400">
-                  <span>Deductible amount:</span><span className="font-medium">${(formData.subtotal_before_gst * formData.business_use_percent / 100).toFixed(2)}</span>
+                  <span>Deductible amount:</span>
+                  <span className="font-medium">${(formData.subtotal_before_gst * formData.business_use_percent / 100).toFixed(2)}</span>
                 </div>
                 <div className="flex justify-between text-gray-600 dark:text-gray-400">
-                  <span>GST ITC claim:</span><span className="font-medium">${(formData.gst_paid * formData.business_use_percent / 100).toFixed(2)}</span>
+                  <span>GST ITC claim:</span>
+                  <span className="font-medium">${(formData.gst_paid * formData.business_use_percent / 100).toFixed(2)}</span>
                 </div>
               </div>
 
-              {/* Current receipt when editing */}
+              {/* Current receipt when editing — signed URL via ReceiptPreview */}
               {editingId && (() => {
                 const currentExp = expenses.find(e => e.id === editingId);
                 if (!currentExp?.receipt_url) return null;
-                const fileType = getFileType(currentExp.receipt_url);
                 return (
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Current Receipt</p>
-                    {fileType === 'image' ? (
-                      <a href={currentExp.receipt_url} target="_blank" rel="noopener noreferrer">
-                        <img
-                          src={currentExp.receipt_url}
-                          alt="Current receipt"
-                          className="w-full max-h-48 object-cover rounded-lg border border-gray-200 dark:border-gray-700 hover:opacity-90 transition-opacity"
-                        />
-                      </a>
-                    ) : (
-                      <a
-                        href={currentExp.receipt_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="flex items-center gap-2 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg text-sm text-teal-600 dark:text-teal-400 hover:underline"
-                      >
-                        <FileText className="w-4 h-4" />
-                        View current receipt
-                        <ExternalLink className="w-3 h-3 ml-auto" />
-                      </a>
-                    )}
+                    <ReceiptPreview
+                      path={currentExp.receipt_url}
+                      className="w-full max-h-48 object-cover rounded-lg border border-gray-200 dark:border-gray-700 hover:opacity-90 transition-opacity"
+                    />
                     <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Select a new file below to replace it</p>
                   </div>
                 );
@@ -484,13 +492,11 @@ export function ExpensesPage() {
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                   {editingId ? 'Replace Receipt (optional)' : 'Receipt / Photo'}
                 </label>
-                <div className="flex items-center gap-2">
-                  <label className="flex items-center gap-2 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 text-sm text-gray-600 dark:text-gray-400">
-                    <Upload className="w-4 h-4" />
-                    {receiptFile ? receiptFile.name : 'Choose file'}
-                    <input type="file" onChange={e => setReceiptFile(e.target.files?.[0] || null)} className="hidden" accept="image/*,.pdf" />
-                  </label>
-                </div>
+                <label className="flex items-center gap-2 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 text-sm text-gray-600 dark:text-gray-400">
+                  <Upload className="w-4 h-4" />
+                  {receiptFile ? receiptFile.name : 'Choose file'}
+                  <input type="file" onChange={e => setReceiptFile(e.target.files?.[0] || null)} className="hidden" accept="image/*,.pdf" />
+                </label>
               </div>
 
               <div>
@@ -526,7 +532,9 @@ export function ExpensesPage() {
             <div className="flex items-center justify-between">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-gray-900 dark:text-white truncate">{exp.vendor || exp.description || 'Expense'}</span>
+                  <span className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                    {exp.vendor || exp.description || 'Expense'}
+                  </span>
                   {(exp as any).tax_confidence_status === 'needs_review' && <AlertTriangle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />}
                   {(exp as any).tax_confidence_status === 'ask_accountant' && <AlertTriangle className="w-3.5 h-3.5 text-red-500 flex-shrink-0" />}
                   {exp.receipt_url && <Receipt className="w-3 h-3 text-teal-500 flex-shrink-0" />}
