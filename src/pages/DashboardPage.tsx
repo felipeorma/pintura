@@ -212,7 +212,7 @@ export function DashboardPage() {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
           <button
             type="button"
-            onClick={() => navigate('/work-hours')}
+            onClick={() => navigate('/hours')}
             className="flex items-center justify-center gap-2 px-3 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium rounded-lg transition-colors"
           >
             <Clock className="w-4 h-4" />
