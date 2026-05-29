@@ -55,6 +55,8 @@ export function ExpensesPage() {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [filterCategory, setFilterCategory] = useState('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
   const [uploading, setUploading] = useState(false);
   const [previewExpense, setPreviewExpense] = useState<Expense | null>(null);
 
@@ -202,7 +204,13 @@ export function ExpensesPage() {
     setShowForm(true);
   }
 
-  const filtered = filterCategory === 'all' ? expenses : expenses.filter(e => e.category === filterCategory);
+  const filtered = expenses.filter(e => {
+    if (filterCategory !== 'all' && e.category !== filterCategory) return false;
+    if (dateFrom && e.expense_date < dateFrom) return false;
+    if (dateTo && e.expense_date > dateTo) return false;
+    return true;
+  });
+
   const totalExpenses = filtered.reduce((s, e) => s + e.total_paid, 0);
   const totalDeductible = filtered.reduce((s, e) => s + e.deductible_amount, 0);
 
@@ -236,11 +244,48 @@ export function ExpensesPage() {
       </div>
 
       {/* Category filter */}
-      <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
-        <button onClick={() => setFilterCategory('all')} className={`px-3 py-1.5 text-xs font-medium rounded-lg whitespace-nowrap ${filterCategory === 'all' ? 'bg-teal-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700'}`}>All</button>
+      <div className="flex gap-2 mb-3 overflow-x-auto pb-1">
+        <button
+          onClick={() => setFilterCategory('all')}
+          className={`px-3 py-1.5 text-xs font-medium rounded-lg whitespace-nowrap ${filterCategory === 'all' ? 'bg-teal-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700'}`}
+        >
+          All
+        </button>
         {EXPENSE_CATEGORY_DATA.map(c => (
-          <button key={c.name} onClick={() => setFilterCategory(c.name)} className={`px-3 py-1.5 text-xs font-medium rounded-lg whitespace-nowrap ${filterCategory === c.name ? 'bg-teal-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700'}`}>{c.name}</button>
+          <button
+            key={c.name}
+            onClick={() => setFilterCategory(c.name)}
+            className={`px-3 py-1.5 text-xs font-medium rounded-lg whitespace-nowrap ${filterCategory === c.name ? 'bg-teal-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700'}`}
+          >
+            {c.name}
+          </button>
         ))}
+      </div>
+
+      {/* Date range filter */}
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">Date:</span>
+        <input
+          type="date"
+          value={dateFrom}
+          onChange={e => setDateFrom(e.target.value)}
+          className="px-2 py-1.5 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300"
+        />
+        <span className="text-xs text-gray-400">→</span>
+        <input
+          type="date"
+          value={dateTo}
+          onChange={e => setDateTo(e.target.value)}
+          className="px-2 py-1.5 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300"
+        />
+        {(dateFrom || dateTo) && (
+          <button
+            onClick={() => { setDateFrom(''); setDateTo(''); }}
+            className="px-2 py-1.5 text-xs text-red-500 hover:text-red-700 border border-red-200 dark:border-red-900/40 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+          >
+            Clear
+          </button>
+        )}
       </div>
 
       {/* Preview Modal */}
@@ -326,7 +371,6 @@ export function ExpensesPage() {
                 </div>
               )}
 
-              {/* Receipt — signed URL via ReceiptPreview */}
               {previewExpense.receipt_url && (
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Receipt</p>
@@ -472,7 +516,7 @@ export function ExpensesPage() {
                 </div>
               </div>
 
-              {/* Current receipt when editing — signed URL via ReceiptPreview */}
+              {/* Current receipt when editing */}
               {editingId && (() => {
                 const currentExp = expenses.find(e => e.id === editingId);
                 if (!currentExp?.receipt_url) return null;
@@ -521,7 +565,7 @@ export function ExpensesPage() {
         {filtered.length === 0 ? (
           <div className="text-center py-12 text-gray-400 dark:text-gray-500">
             <Receipt className="w-10 h-10 mx-auto mb-2 opacity-50" />
-            <p>No expenses recorded</p>
+            <p>No expenses recorded{(dateFrom || dateTo) ? ' for this date range' : ''}</p>
           </div>
         ) : filtered.map(exp => (
           <div
@@ -540,7 +584,7 @@ export function ExpensesPage() {
                   {exp.receipt_url && <Receipt className="w-3 h-3 text-teal-500 flex-shrink-0" />}
                 </div>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                  {format(new Date(exp.expense_date + 'T00:00'), 'MMM d')} • {exp.category || 'Uncategorized'}
+                  {format(new Date(exp.expense_date + 'T00:00'), 'MMM d, yyyy')} • {exp.category || 'Uncategorized'}
                   {exp.description && ` • ${exp.description}`}
                 </p>
               </div>
