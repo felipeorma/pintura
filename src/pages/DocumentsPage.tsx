@@ -2,13 +2,26 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { DOCUMENT_TYPES } from '../lib/types';
-import type { Document } from '../lib/types';
-import { X, FolderOpen, Upload, ExternalLink } from 'lucide-react';
+import type { Document, Expense } from '../lib/types';
+import { X, FolderOpen, Upload, ExternalLink, FileText, Receipt } from 'lucide-react';
 import { format } from 'date-fns';
+
+interface UnifiedItem {
+  id: string;
+  title: string;
+  label: string;
+  url: string | null;
+  date: string;
+  notes: string | null;
+  canDelete: boolean;
+  source: 'document' | 'expense';
+  rawDoc?: Document;
+}
 
 export function DocumentsPage() {
   const { user } = useAuth();
   const [documents, setDocuments] = useState<Document[]>([]);
+  const [expensesWithReceipts, setExpensesWithReceipts] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -21,13 +34,24 @@ export function DocumentsPage() {
   });
   const [file, setFile] = useState<File | null>(null);
 
+  function getFileType(url: string): 'image' | 'pdf' | 'other' {
+    const lower = url.toLowerCase();
+    if (/\.(jpg|jpeg|png|gif|webp|heic)/.test(lower)) return 'image';
+    if (/\.pdf/.test(lower)) return 'pdf';
+    return 'other';
+  }
+
   useEffect(() => {
     if (user) loadDocuments();
   }, [user]);
 
   async function loadDocuments() {
-    const { data } = await supabase.from('documents').select('*').eq('user_id', user!.id).order('uploaded_at', { ascending: false });
-    setDocuments(data || []);
+    const [docsRes, expRes] = await Promise.all([
+      supabase.from('documents').select('*').eq('user_id', user!.id).order('uploaded_at', { ascending: false }),
+      supabase.from('expenses').select('*').eq('user_id', user!.id).not('receipt_url', 'is', null).order('expense_date', { ascending: false }),
+    ]);
+    setDocuments(docsRes.data || []);
+    setExpensesWithReceipts(expRes.data || []);
     setLoading(false);
   }
 
@@ -80,24 +104,73 @@ export function DocumentsPage() {
     loadDocuments();
   }
 
-  const filtered = filterType === 'all' ? documents : documents.filter(d => d.document_type === filterType);
+  // Build unified list
+  const docItems: UnifiedItem[] = documents.map(d => ({
+    id: d.id,
+    title: d.title || 'Untitled',
+    label: d.document_type || 'Other',
+    url: d.file_url,
+    date: d.uploaded_at,
+    notes: d.notes,
+    canDelete: true,
+    source: 'document',
+    rawDoc: d,
+  }));
+
+  const receiptItems: UnifiedItem[] = expensesWithReceipts.map(e => ({
+    id: e.id,
+    title: [e.vendor, e.category, e.description].filter(Boolean).join(' • ') || 'Expense Receipt',
+    label: 'Receipt',
+    url: e.receipt_url,
+    date: e.expense_date,
+    notes: e.notes,
+    canDelete: false,
+    source: 'expense',
+  }));
+
+  const allItems = [...docItems, ...receiptItems].sort(
+    (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+  );
+
+  const filtered = filterType === 'all' ? allItems : allItems.filter(i => i.label === filterType);
+
+  const labelColors: Record<string, string> = {
+    'Receipt': 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300',
+    'Invoice PDF': 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300',
+    'WCB document': 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300',
+    'GST / CRA document': 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300',
+    'Contract': 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300',
+    'Job site photo': 'bg-pink-100 dark:bg-pink-900/30 text-pink-700 dark:text-pink-300',
+    'Other': 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400',
+  };
 
   if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-2 border-teal-600 border-t-transparent rounded-full" /></div>;
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Documents</h1>
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Documents</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400">{allItems.length} files total</p>
+        </div>
         <button onClick={() => setShowForm(true)} className="flex items-center gap-1.5 px-3 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium rounded-lg transition-colors">
           <Upload className="w-4 h-4" /> Upload
         </button>
       </div>
 
       <div className="flex gap-2 mb-4 overflow-x-auto">
-        <button onClick={() => setFilterType('all')} className={`px-3 py-1.5 text-sm font-medium rounded-lg whitespace-nowrap ${filterType === 'all' ? 'bg-teal-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700'}`}>All</button>
-        {DOCUMENT_TYPES.map(t => (
-          <button key={t} onClick={() => setFilterType(t)} className={`px-3 py-1.5 text-sm font-medium rounded-lg whitespace-nowrap ${filterType === t ? 'bg-teal-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700'}`}>{t}</button>
-        ))}
+        <button onClick={() => setFilterType('all')} className={`px-3 py-1.5 text-sm font-medium rounded-lg whitespace-nowrap ${filterType === 'all' ? 'bg-teal-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700'}`}>
+          All ({allItems.length})
+        </button>
+        {DOCUMENT_TYPES.map(t => {
+          const count = allItems.filter(i => i.label === t).length;
+          if (count === 0) return null;
+          return (
+            <button key={t} onClick={() => setFilterType(t)} className={`px-3 py-1.5 text-sm font-medium rounded-lg whitespace-nowrap ${filterType === t ? 'bg-teal-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700'}`}>
+              {t} ({count})
+            </button>
+          );
+        })}
       </div>
 
       {showForm && (
@@ -139,25 +212,63 @@ export function DocumentsPage() {
         {filtered.length === 0 ? (
           <div className="text-center py-12 text-gray-400 dark:text-gray-500">
             <FolderOpen className="w-10 h-10 mx-auto mb-2 opacity-50" />
-            <p>No documents uploaded</p>
+            <p>No documents found</p>
           </div>
-        ) : filtered.map(doc => (
-          <div key={doc.id} className="bg-white dark:bg-gray-800 rounded-lg border border-gray-100 dark:border-gray-700 p-3">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-gray-900 dark:text-white">{doc.title || 'Untitled'}</span>
-                  {doc.document_type && <span className="text-xs bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 px-1.5 py-0.5 rounded">{doc.document_type}</span>}
-                </div>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{format(new Date(doc.uploaded_at), 'MMM d, yyyy')}</p>
+        ) : filtered.map(item => (
+          <div key={`${item.source}-${item.id}`} className="bg-white dark:bg-gray-800 rounded-lg border border-gray-100 dark:border-gray-700 p-3">
+            <div className="flex items-start justify-between gap-3">
+              {/* Icon */}
+              <div className="flex-shrink-0 mt-0.5">
+                {item.url && getFileType(item.url) === 'image'
+                  ? <div className="w-8 h-8 rounded-md overflow-hidden border border-gray-200 dark:border-gray-700">
+                      <img src={item.url} alt="" className="w-full h-full object-cover" />
+                    </div>
+                  : <div className="w-8 h-8 rounded-md bg-gray-100 dark:bg-gray-700 flex items-center justify-center">
+                      {item.source === 'expense'
+                        ? <Receipt className="w-4 h-4 text-gray-400" />
+                        : <FileText className="w-4 h-4 text-gray-400" />}
+                    </div>
+                }
               </div>
-              <div className="flex items-center gap-2">
-                {doc.file_url && (
-                  <a href={doc.file_url} target="_blank" rel="noopener noreferrer" className="p-1.5 text-gray-400 hover:text-teal-600">
+
+              {/* Info */}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm font-medium text-gray-900 dark:text-white truncate">{item.title}</span>
+                  <span className={`text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 ${labelColors[item.label] || labelColors['Other']}`}>
+                    {item.label}
+                  </span>
+                  {item.source === 'expense' && (
+                    <span className="text-xs text-gray-400 dark:text-gray-500 flex-shrink-0">from Expenses</span>
+                  )}
+                </div>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                  {format(new Date(item.date + (item.date.includes('T') ? '' : 'T00:00')), 'MMM d, yyyy')}
+                </p>
+                {item.notes && <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5 truncate">{item.notes}</p>}
+              </div>
+
+              {/* Actions */}
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {item.url && (
+                  
+                    href={item.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="p-1.5 text-gray-400 hover:text-teal-600 transition-colors"
+                    onClick={e => e.stopPropagation()}
+                  >
                     <ExternalLink className="w-4 h-4" />
                   </a>
                 )}
-                <button onClick={() => deleteDocument(doc)} className="text-xs text-red-400 hover:text-red-600">Delete</button>
+                {item.canDelete && item.rawDoc && (
+                  <button
+                    onClick={() => deleteDocument(item.rawDoc!)}
+                    className="text-xs text-red-400 hover:text-red-600 transition-colors"
+                  >
+                    Delete
+                  </button>
+                )}
               </div>
             </div>
           </div>
