@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { DashboardCard } from '../components/DashboardCard';
 import {
   Clock, DollarSign, FileText, Receipt,
   TrendingUp, Calculator, ShieldCheck, Wallet, Car, Home,
-  AlertTriangle, CreditCard
+  AlertTriangle, CreditCard, Plus
 } from 'lucide-react';
 import { startOfWeek, endOfWeek, startOfMonth, endOfMonth, format } from 'date-fns';
 
@@ -26,7 +27,6 @@ interface DashboardData {
   businessKmYear: number;
   vehicleBusinessPercent: number | null;
   homeOfficeDeductible: number;
-  // New TOTAL NET fields
   totalPaymentsReceived: number;
   totalDeductibleExpenses: number;
   totalIncomeBeforeGst: number;
@@ -40,6 +40,7 @@ interface DashboardData {
 
 export function DashboardPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -119,10 +120,6 @@ export function DashboardPage() {
     const vehicleBusinessPercent = vehicles.data?.[0]?.business_use_percent || null;
     const homeOfficeDeductible = (homeExpenses.data || []).reduce((s, r) => s + (r.deductible_amount || 0), 0);
 
-    const missingReceipts = missingReceiptsRes.data?.length || 0;
-    const unpaidInvoiceCount = unpaidInv.data?.length || 0;
-    const uninvoicedHoursCount = uninvoicedCount.data?.length || 0;
-
     setData({
       hoursThisWeek,
       hoursThisMonth,
@@ -144,12 +141,13 @@ export function DashboardPage() {
       totalDeductibleExpenses,
       totalIncomeBeforeGst,
       upcomingWcbBalance,
-      missingReceipts,
-      unpaidInvoiceCount,
-      uninvoicedHoursCount,
+      missingReceipts: missingReceiptsRes.data?.length || 0,
+      unpaidInvoiceCount: unpaidInv.data?.length || 0,
+      uninvoicedHoursCount: uninvoicedCount.data?.length || 0,
       totalNet,
       profitBeforeTaxReserve,
     });
+
     setLoading(false);
   }
 
@@ -175,7 +173,36 @@ export function DashboardPage() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Dashboard</h1>
+      <div className="flex flex-col gap-4 mb-6 lg:flex-row lg:items-center lg:justify-between">
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+          <button
+            onClick={() => navigate('/work-hours')}
+            className="flex items-center justify-center gap-2 px-3 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium rounded-lg transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            Log Hours
+          </button>
+
+          <button
+            onClick={() => navigate('/mileage')}
+            className="flex items-center justify-center gap-2 px-3 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+          >
+            <Car className="w-4 h-4" />
+            Vehicle / KM
+          </button>
+
+          <button
+            onClick={() => navigate('/expenses')}
+            className="flex items-center justify-center gap-2 px-3 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+          >
+            <Receipt className="w-4 h-4" />
+            Expenses
+          </button>
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         <DashboardCard title="Hours This Week" value={data.hoursThisWeek.toFixed(1)} icon={<Clock className="w-5 h-5" />} />
         <DashboardCard title="Hours This Month" value={data.hoursThisMonth.toFixed(1)} icon={<Clock className="w-5 h-5" />} />
@@ -194,7 +221,6 @@ export function DashboardPage() {
         <DashboardCard title="Home Office Deductible" value={fmt(data.homeOfficeDeductible)} icon={<Home className="w-5 h-5" />} subtitle="This year" />
       </div>
 
-      {/* TOTAL NET Section */}
       <div className={`mt-8 rounded-xl border-2 p-6 ${netColor}`}>
         <div className="flex items-center gap-3 mb-4">
           <div className={`p-2 rounded-lg ${data.totalNet >= 0 ? 'bg-green-100 dark:bg-green-900/40' : 'bg-red-100 dark:bg-red-900/40'}`}>
@@ -244,7 +270,6 @@ export function DashboardPage() {
         </div>
       </div>
 
-      {/* Helper notices */}
       <div className="mt-4 space-y-1.5">
         <p className="text-xs text-gray-400 dark:text-gray-500 italic flex items-start gap-1.5">
           <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
