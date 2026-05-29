@@ -95,8 +95,8 @@ export function ExpensesPage() {
       setUploading(true);
       const filePath = `${user!.id}/${Date.now()}-${receiptFile.name}`;
       await supabase.storage.from('receipts').upload(filePath, receiptFile);
-      const { data: urlData } = supabase.storage.from('receipts').getPublicUrl(filePath);
-      receiptUrl = urlData?.publicUrl || filePath;
+      // Guardamos el path, no la URL pública
+      receiptUrl = filePath;
       setUploading(false);
     }
 
