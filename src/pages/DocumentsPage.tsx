@@ -20,6 +20,7 @@ interface UnifiedItem {
 
 export function DocumentsPage() {
   const { user } = useAuth();
+
   const [documents, setDocuments] = useState<Document[]>([]);
   const [expensesWithReceipts, setExpensesWithReceipts] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,24 +33,69 @@ export function DocumentsPage() {
     title: '',
     notes: '',
   });
+
   const [file, setFile] = useState<File | null>(null);
 
   function getFileType(url: string): 'image' | 'pdf' | 'other' {
     const lower = url.toLowerCase();
-    if (/\.(jpg|jpeg|png|gif|webp|heic)/.test(lower)) return 'image';
-    if (/\.pdf/.test(lower)) return 'pdf';
+
+    if (/\.(jpg|jpeg|png|gif|webp|heic)(\?|$)/.test(lower)) return 'image';
+    if (/\.pdf(\?|$)/.test(lower)) return 'pdf';
+
     return 'other';
   }
 
+  function getBucket(type: string): string {
+    switch (type) {
+      case 'Receipt':
+        return 'receipts';
+      case 'Invoice PDF':
+        return 'invoices';
+      case 'WCB document':
+        return 'wcb-documents';
+      case 'Job site photo':
+        return 'job-site-photos';
+      case 'GST / CRA document':
+        return 'cra-gst-documents';
+      default:
+        return 'receipts';
+    }
+  }
+
+  function formatItemDate(date: string) {
+    if (!date) return '';
+
+    const safeDate = date.includes('T') ? date : `${date}T00:00`;
+
+    return format(new Date(safeDate), 'MMM d, yyyy');
+  }
+
   useEffect(() => {
-    if (user) loadDocuments();
+    if (user) {
+      loadDocuments();
+    }
   }, [user]);
 
   async function loadDocuments() {
+    if (!user) return;
+
+    setLoading(true);
+
     const [docsRes, expRes] = await Promise.all([
-      supabase.from('documents').select('*').eq('user_id', user!.id).order('uploaded_at', { ascending: false }),
-      supabase.from('expenses').select('*').eq('user_id', user!.id).not('receipt_url', 'is', null).order('expense_date', { ascending: false }),
+      supabase
+        .from('documents')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('uploaded_at', { ascending: false }),
+
+      supabase
+        .from('expenses')
+        .select('*')
+        .eq('user_id', user.id)
+        .not('receipt_url', 'is', null)
+        .order('expense_date', { ascending: false }),
     ]);
+
     setDocuments(docsRes.data || []);
     setExpensesWithReceipts(expRes.data || []);
     setLoading(false);
@@ -57,54 +103,76 @@ export function DocumentsPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!file) return;
+
+    if (!user || !file) return;
+
     setUploading(true);
 
-    const bucket = getBucket(formData.document_type);
-    const filePath = `${user!.id}/${Date.now()}-${file.name}`;
-    const { error: uploadError } = await supabase.storage.from(bucket).upload(filePath, file);
+    try {
+      const bucket = getBucket(formData.document_type);
+      const filePath = `${user.id}/${Date.now()}-${file.name}`;
 
-    if (uploadError) {
+      const { error: uploadError } = await supabase.storage
+        .from(bucket)
+        .upload(filePath, file);
+
+      if (uploadError) {
+        console.error('Upload error:', uploadError);
+        setUploading(false);
+        return;
+      }
+
+      const { data: urlData } = supabase.storage
+        .from(bucket)
+        .getPublicUrl(filePath);
+
+      const fileUrl = urlData?.publicUrl || filePath;
+
+      const { error: insertError } = await supabase.from('documents').insert({
+        user_id: user.id,
+        document_type: formData.document_type || null,
+        title: formData.title || file.name,
+        file_url: fileUrl,
+        notes: formData.notes || null,
+      });
+
+      if (insertError) {
+        console.error('Insert document error:', insertError);
+        setUploading(false);
+        return;
+      }
+
+      setShowForm(false);
+      setFormData({
+        document_type: '',
+        title: '',
+        notes: '',
+      });
+      setFile(null);
+
+      await loadDocuments();
+    } finally {
       setUploading(false);
-      return;
-    }
-
-    const { data: urlData } = supabase.storage.from(bucket).getPublicUrl(filePath);
-    const fileUrl = urlData?.publicUrl || filePath;
-
-    await supabase.from('documents').insert({
-      user_id: user!.id,
-      document_type: formData.document_type || null,
-      title: formData.title || file.name,
-      file_url: fileUrl,
-      notes: formData.notes || null,
-    });
-
-    setShowForm(false);
-    setFormData({ document_type: '', title: '', notes: '' });
-    setFile(null);
-    setUploading(false);
-    loadDocuments();
-  }
-
-  function getBucket(type: string): string {
-    switch (type) {
-      case 'Receipt': return 'receipts';
-      case 'Invoice PDF': return 'invoices';
-      case 'WCB document': return 'wcb-documents';
-      case 'Job site photo': return 'job-site-photos';
-      case 'GST / CRA document': return 'cra-gst-documents';
-      default: return 'receipts';
     }
   }
 
   async function deleteDocument(doc: Document) {
     if (!confirm('Delete this document?')) return;
-    await supabase.from('documents').delete().eq('id', doc.id);
+
+    const { error } = await supabase
+      .from('documents')
+      .delete()
+      .eq('id', doc.id);
+
+    if (error) {
+      console.error('Delete document error:', error);
+      return;
+    }
+
     loadDocuments();
   }
 
-  const docItems: UnifiedItem[] = documents.map(d => ({
+  const docItems: UnifiedItem[] = documents.map((d) => ({
     id: d.id,
     title: d.title || 'Untitled',
     label: d.document_type || 'Other',
@@ -116,9 +184,11 @@ export function DocumentsPage() {
     rawDoc: d,
   }));
 
-  const receiptItems: UnifiedItem[] = expensesWithReceipts.map(e => ({
+  const receiptItems: UnifiedItem[] = expensesWithReceipts.map((e) => ({
     id: e.id,
-    title: [e.vendor, e.category, e.description].filter(Boolean).join(' • ') || 'Expense Receipt',
+    title:
+      [e.vendor, e.category, e.description].filter(Boolean).join(' • ') ||
+      'Expense Receipt',
     label: 'Receipt',
     url: e.receipt_url,
     date: e.expense_date,
@@ -131,36 +201,54 @@ export function DocumentsPage() {
     (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
   );
 
-  const filtered = filterType === 'all' ? allItems : allItems.filter(i => i.label === filterType);
+  const filtered =
+    filterType === 'all'
+      ? allItems
+      : allItems.filter((item) => item.label === filterType);
 
   const labelColors: Record<string, string> = {
-    'Receipt': 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300',
-    'Invoice PDF': 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300',
-    'WCB document': 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300',
-    'GST / CRA document': 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300',
-    'Contract': 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300',
-    'Job site photo': 'bg-pink-100 dark:bg-pink-900/30 text-pink-700 dark:text-pink-300',
-    'Other': 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400',
+    Receipt:
+      'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300',
+    'Invoice PDF':
+      'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300',
+    'WCB document':
+      'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300',
+    'GST / CRA document':
+      'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300',
+    Contract:
+      'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300',
+    'Job site photo':
+      'bg-pink-100 dark:bg-pink-900/30 text-pink-700 dark:text-pink-300',
+    Other:
+      'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400',
   };
 
-  if (loading) return (
-    <div className="flex items-center justify-center h-64">
-      <div className="animate-spin w-8 h-8 border-2 border-teal-600 border-t-transparent rounded-full" />
-    </div>
-  );
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin w-8 h-8 border-2 border-teal-600 border-t-transparent rounded-full" />
+      </div>
+    );
+  }
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Documents</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">{allItems.length} files total</p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+            Documents
+          </h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
+            {allItems.length} files total
+          </p>
         </div>
+
         <button
           onClick={() => setShowForm(true)}
           className="flex items-center gap-1.5 px-3 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium rounded-lg transition-colors"
         >
-          <Upload className="w-4 h-4" /> Upload
+          <Upload className="w-4 h-4" />
+          Upload
         </button>
       </div>
 
@@ -168,20 +256,31 @@ export function DocumentsPage() {
       <div className="flex gap-2 mb-4 overflow-x-auto">
         <button
           onClick={() => setFilterType('all')}
-          className={`px-3 py-1.5 text-sm font-medium rounded-lg whitespace-nowrap ${filterType === 'all' ? 'bg-teal-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700'}`}
+          className={`px-3 py-1.5 text-sm font-medium rounded-lg whitespace-nowrap ${
+            filterType === 'all'
+              ? 'bg-teal-600 text-white'
+              : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700'
+          }`}
         >
           All ({allItems.length})
         </button>
-        {DOCUMENT_TYPES.map(t => {
-          const count = allItems.filter(i => i.label === t).length;
+
+        {DOCUMENT_TYPES.map((type) => {
+          const count = allItems.filter((item) => item.label === type).length;
+
           if (count === 0) return null;
+
           return (
             <button
-              key={t}
-              onClick={() => setFilterType(t)}
-              className={`px-3 py-1.5 text-sm font-medium rounded-lg whitespace-nowrap ${filterType === t ? 'bg-teal-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700'}`}
+              key={type}
+              onClick={() => setFilterType(type)}
+              className={`px-3 py-1.5 text-sm font-medium rounded-lg whitespace-nowrap ${
+                filterType === type
+                  ? 'bg-teal-600 text-white'
+                  : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700'
+              }`}
             >
-              {t} ({count})
+              {type} ({count})
             </button>
           );
         })}
@@ -192,51 +291,94 @@ export function DocumentsPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
           <div className="bg-white dark:bg-gray-800 rounded-xl w-full max-w-md shadow-xl">
             <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Upload Document</h2>
-              <button onClick={() => setShowForm(false)} className="p-1 text-gray-400 hover:text-gray-600">
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                Upload Document
+              </h2>
+
+              <button
+                onClick={() => setShowForm(false)}
+                className="p-1 text-gray-400 hover:text-gray-600"
+              >
                 <X className="w-5 h-5" />
               </button>
             </div>
+
             <form onSubmit={handleSubmit} className="p-4 space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Type</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Type
+                </label>
+
                 <select
                   value={formData.document_type}
-                  onChange={e => setFormData(f => ({ ...f, document_type: e.target.value }))}
+                  onChange={(e) =>
+                    setFormData((current) => ({
+                      ...current,
+                      document_type: e.target.value,
+                    }))
+                  }
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 >
                   <option value="">Select type...</option>
-                  {DOCUMENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+
+                  {DOCUMENT_TYPES.map((type) => (
+                    <option key={type} value={type}>
+                      {type}
+                    </option>
+                  ))}
                 </select>
               </div>
+
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Title</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Title
+                </label>
+
                 <input
                   type="text"
                   value={formData.title}
-                  onChange={e => setFormData(f => ({ ...f, title: e.target.value }))}
+                  onChange={(e) =>
+                    setFormData((current) => ({
+                      ...current,
+                      title: e.target.value,
+                    }))
+                  }
                   placeholder="Document name"
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 />
               </div>
+
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">File</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  File
+                </label>
+
                 <input
                   type="file"
-                  onChange={e => setFile(e.target.files?.[0] || null)}
+                  onChange={(e) => setFile(e.target.files?.[0] || null)}
                   required
                   className="w-full text-sm text-gray-500 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-teal-50 file:text-teal-700 hover:file:bg-teal-100 dark:file:bg-teal-900/20 dark:file:text-teal-300"
                 />
               </div>
+
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Notes</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Notes
+                </label>
+
                 <textarea
                   value={formData.notes}
-                  onChange={e => setFormData(f => ({ ...f, notes: e.target.value }))}
+                  onChange={(e) =>
+                    setFormData((current) => ({
+                      ...current,
+                      notes: e.target.value,
+                    }))
+                  }
                   rows={2}
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 />
               </div>
+
               <button
                 type="submit"
                 disabled={!file || uploading}
@@ -256,78 +398,94 @@ export function DocumentsPage() {
             <FolderOpen className="w-10 h-10 mx-auto mb-2 opacity-50" />
             <p>No documents found</p>
           </div>
-        ) : filtered.map(item => (
-          <div
-            key={`${item.source}-${item.id}`}
-            className="bg-white dark:bg-gray-800 rounded-lg border border-gray-100 dark:border-gray-700 p-3"
-          >
-            <div className="flex items-start justify-between gap-3">
-
-              {/* Thumbnail or icon */}
-              <div className="flex-shrink-0 mt-0.5">
-                {item.url && getFileType(item.url) === 'image' ? (
-                  <div className="w-8 h-8 rounded-md overflow-hidden border border-gray-200 dark:border-gray-700">
-                    <img src={item.url} alt="" className="w-full h-full object-cover" />
-                  </div>
-                ) : (
-                  <div className="w-8 h-8 rounded-md bg-gray-100 dark:bg-gray-700 flex items-center justify-center">
-                    {item.source === 'expense'
-                      ? <Receipt className="w-4 h-4 text-gray-400" />
-                      : <FileText className="w-4 h-4 text-gray-400" />
-                    }
-                  </div>
-                )}
-              </div>
-
-              {/* Info */}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-sm font-medium text-gray-900 dark:text-white truncate">
-                    {item.title}
-                  </span>
-                  <span className={`text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 ${labelColors[item.label] || labelColors['Other']}`}>
-                    {item.label}
-                  </span>
-                  {item.source === 'expense' && (
-                    <span className="text-xs text-gray-400 dark:text-gray-500 flex-shrink-0">
-                      from Expenses
-                    </span>
+        ) : (
+          filtered.map((item) => (
+            <div
+              key={`${item.source}-${item.id}`}
+              className="bg-white dark:bg-gray-800 rounded-lg border border-gray-100 dark:border-gray-700 p-3"
+            >
+              <div className="flex items-start justify-between gap-3">
+                {/* Thumbnail or icon */}
+                <div className="flex-shrink-0 mt-0.5">
+                  {item.url && getFileType(item.url) === 'image' ? (
+                    <div className="w-8 h-8 rounded-md overflow-hidden border border-gray-200 dark:border-gray-700">
+                      <img
+                        src={item.url}
+                        alt={item.title}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  ) : (
+                    <div className="w-8 h-8 rounded-md bg-gray-100 dark:bg-gray-700 flex items-center justify-center">
+                      {item.source === 'expense' ? (
+                        <Receipt className="w-4 h-4 text-gray-400" />
+                      ) : (
+                        <FileText className="w-4 h-4 text-gray-400" />
+                      )}
+                    </div>
                   )}
                 </div>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                  {format(new Date(item.date + (item.date.includes('T') ? '' : 'T00:00')), 'MMM d, yyyy')}
-                </p>
-                {item.notes && (
-                  <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5 truncate">{item.notes}</p>
-                )}
-              </div>
 
-              {/* Actions */}
-              <div className="flex items-center gap-2 flex-shrink-0">
-                {item.url && (
-                  <a
-                    href={item.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="p-1.5 text-gray-400 hover:text-teal-600 transition-colors"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <ExternalLink className="w-4 h-4" />
-                  </a>
-                )}
-                {item.canDelete && item.rawDoc && (
-                  <button
-                    onClick={() => deleteDocument(item.rawDoc!)}
-                    className="text-xs text-red-400 hover:text-red-600 transition-colors"
-                  >
-                    Delete
-                  </button>
-                )}
-              </div>
+                {/* Info */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                      {item.title}
+                    </span>
 
+                    <span
+                      className={`text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 ${
+                        labelColors[item.label] || labelColors.Other
+                      }`}
+                    >
+                      {item.label}
+                    </span>
+
+                    {item.source === 'expense' && (
+                      <span className="text-xs text-gray-400 dark:text-gray-500 flex-shrink-0">
+                        from Expenses
+                      </span>
+                    )}
+                  </div>
+
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    {formatItemDate(item.date)}
+                  </p>
+
+                  {item.notes && (
+                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5 truncate">
+                      {item.notes}
+                    </p>
+                  )}
+                </div>
+
+                {/* Actions */}
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {item.url && (
+                    <a
+                      href={item.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-1.5 text-gray-400 hover:text-teal-600 transition-colors"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <ExternalLink className="w-4 h-4" />
+                    </a>
+                  )}
+
+                  {item.canDelete && item.rawDoc && (
+                    <button
+                      onClick={() => deleteDocument(item.rawDoc!)}
+                      className="text-xs text-red-400 hover:text-red-600 transition-colors"
+                    >
+                      Delete
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
-          </div>
-        ))}
+          ))
+        )}
       </div>
     </div>
   );
