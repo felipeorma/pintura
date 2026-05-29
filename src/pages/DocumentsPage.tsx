@@ -1,216 +1,178 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import type { Expense, JobSite, Client } from '../lib/types';
-import { EXPENSE_CATEGORY_DATA, PAYMENT_METHODS, TAX_CONFIDENCE_OPTIONS } from '../lib/expenseData';
-import { Plus, X, Receipt, AlertTriangle, Upload, ExternalLink, FileText, Pencil } from 'lucide-react';
+import { DOCUMENT_TYPES } from '../lib/types';
+import type { Document, Expense } from '../lib/types';
+import { X, FolderOpen, Upload, ExternalLink, FileText, Receipt } from 'lucide-react';
 import { format } from 'date-fns';
-import { getFileUrl } from '../lib/storage';
+import { getFileUrl, getBucket } from '../lib/storage';
 
-// Componente para mostrar un recibo con signed URL
-function ReceiptPreview({ path, className }: { path: string; className?: string }) {
+interface UnifiedItem {
+  id: string;
+  title: string;
+  label: string;
+  path: string | null;
+  date: string;
+  notes: string | null;
+  canDelete: boolean;
+  source: 'document' | 'expense';
+  rawDoc?: Document;
+}
+
+function ItemThumbnail({ path, bucket }: { path: string; bucket: string }) {
   const [url, setUrl] = useState<string | null>(null);
-
-  useEffect(() => {
-    getFileUrl(path, 'receipts').then(setUrl);
-  }, [path]);
-
-  if (!url) return (
-    <div className="flex items-center gap-2 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg text-sm text-gray-400">
-      <FileText className="w-4 h-4" /> Loading...
-    </div>
-  );
-
   const isImage = /\.(jpg|jpeg|png|gif|webp|heic)/i.test(path);
 
-  if (isImage) {
+  useEffect(() => {
+    if (isImage) getFileUrl(path, bucket).then(setUrl);
+  }, [path, bucket]);
+
+  if (isImage && url) {
     return (
-      <button onClick={() => window.open(url, '_blank')} className="w-full text-left">
-        <img
-          src={url}
-          alt="Receipt"
-          className={className || 'w-full rounded-lg border border-gray-200 dark:border-gray-700 hover:opacity-90 transition-opacity'}
-        />
+      <button
+        onClick={() => window.open(url, '_blank')}
+        className="w-8 h-8 rounded-md overflow-hidden border border-gray-200 dark:border-gray-700 flex-shrink-0"
+      >
+        <img src={url} alt="" className="w-full h-full object-cover" />
       </button>
     );
   }
 
   return (
+    <div className="w-8 h-8 rounded-md bg-gray-100 dark:bg-gray-700 flex items-center justify-center flex-shrink-0">
+      {bucket === 'receipts'
+        ? <Receipt className="w-4 h-4 text-gray-400" />
+        : <FileText className="w-4 h-4 text-gray-400" />
+      }
+    </div>
+  );
+}
+
+function OpenFileButton({ path, bucket, className, children }: {
+  path: string;
+  bucket: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    getFileUrl(path, bucket).then(setUrl);
+  }, [path, bucket]);
+
+  return (
     <button
-      onClick={() => window.open(url, '_blank')}
-      className="flex items-center gap-2 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg text-sm text-teal-600 dark:text-teal-400 hover:underline w-full"
+      onClick={(e) => { e.stopPropagation(); if (url) window.open(url, '_blank'); }}
+      disabled={!url}
+      className={className}
     >
-      <FileText className="w-4 h-4" />
-      View Receipt
-      <ExternalLink className="w-3 h-3 ml-auto" />
+      {children}
     </button>
   );
 }
 
-export function ExpensesPage() {
+export function DocumentsPage() {
   const { user } = useAuth();
-  const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [jobSites, setJobSites] = useState<JobSite[]>([]);
-  const [clients, setClients] = useState<Client[]>([]);
+  const [documents, setDocuments] = useState<Document[]>([]);
+  const [expensesWithReceipts, setExpensesWithReceipts] = useState<Expense[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [filterCategory, setFilterCategory] = useState('all');
   const [uploading, setUploading] = useState(false);
-  const [previewExpense, setPreviewExpense] = useState<Expense | null>(null);
+  const [filterType, setFilterType] = useState('all');
 
   const [formData, setFormData] = useState({
-    expense_date: format(new Date(), 'yyyy-MM-dd'),
-    vendor: '',
-    category: '',
-    subcategory: '',
-    description: '',
-    job_site_id: '',
-    client_id: '',
-    subtotal_before_gst: 0,
-    gst_paid: 0,
-    business_use_percent: 100,
-    payment_method: '',
-    tax_confidence_status: 'clear',
+    document_type: '',
+    title: '',
     notes: '',
-    home_office_related: false,
   });
-
-  const [receiptFile, setReceiptFile] = useState<File | null>(null);
+  const [file, setFile] = useState<File | null>(null);
 
   useEffect(() => {
-    if (user) loadData();
+    if (user) loadDocuments();
   }, [user]);
 
-  async function loadData() {
-    const [expRes, sitesRes, clientsRes] = await Promise.all([
-      supabase.from('expenses').select('*, job_sites(site_name)').eq('user_id', user!.id).order('expense_date', { ascending: false }),
-      supabase.from('job_sites').select('*').eq('user_id', user!.id).eq('active', true).order('site_name'),
-      supabase.from('clients').select('*').eq('user_id', user!.id).eq('active', true).order('name'),
+  async function loadDocuments() {
+    const [docsRes, expRes] = await Promise.all([
+      supabase.from('documents').select('*').eq('user_id', user!.id).order('uploaded_at', { ascending: false }),
+      supabase.from('expenses').select('*').eq('user_id', user!.id).not('receipt_url', 'is', null).order('expense_date', { ascending: false }),
     ]);
-    setExpenses(expRes.data || []);
-    setJobSites(sitesRes.data || []);
-    setClients(clientsRes.data || []);
+    setDocuments(docsRes.data || []);
+    setExpensesWithReceipts(expRes.data || []);
     setLoading(false);
-  }
-
-  const selectedCategoryData = EXPENSE_CATEGORY_DATA.find(c => c.name === formData.category);
-  const selectedSubcategoryData = selectedCategoryData?.subcategories.find(s => s.name === formData.subcategory);
-
-  function onCategoryChange(cat: string) {
-    setFormData(f => ({
-      ...f,
-      category: cat,
-      subcategory: '',
-      home_office_related: cat === 'Home office',
-      business_use_percent: cat === 'Phone' ? 50 : cat === 'Internet' ? 25 : cat === 'Meals' ? 50 : 100,
-    }));
-  }
-
-  function onSubcategoryChange(sub: string) {
-    const subData = selectedCategoryData?.subcategories.find(s => s.name === sub);
-    setFormData(f => ({
-      ...f,
-      subcategory: sub,
-      business_use_percent: subData?.defaultBusinessUse ?? f.business_use_percent,
-      tax_confidence_status: subData?.needsReview ? 'needs_review' : f.tax_confidence_status,
-    }));
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const totalPaid = formData.subtotal_before_gst + formData.gst_paid;
-    const bup = formData.business_use_percent / 100;
-    const deductibleAmount = formData.subtotal_before_gst * bup;
-    const itcClaimAmount = formData.gst_paid * bup;
+    if (!file) return;
+    setUploading(true);
 
-    let receiptUrl: string | null = null;
-    if (receiptFile) {
-      setUploading(true);
-      const filePath = `${user!.id}/${Date.now()}-${receiptFile.name}`;
-      await supabase.storage.from('receipts').upload(filePath, receiptFile);
-      receiptUrl = filePath; // guardamos el path, no la URL pública
+    const bucket = getBucket(formData.document_type);
+    const filePath = `${user!.id}/${Date.now()}-${file.name}`;
+    const { error: uploadError } = await supabase.storage.from(bucket).upload(filePath, file);
+
+    if (uploadError) {
       setUploading(false);
+      return;
     }
 
-    const record: any = {
+    await supabase.from('documents').insert({
       user_id: user!.id,
-      expense_date: formData.expense_date,
-      vendor: formData.vendor || null,
-      category: formData.category || null,
-      description: formData.subcategory
-        ? `${formData.subcategory}${formData.description ? ' - ' + formData.description : ''}`
-        : formData.description || null,
-      job_site_id: formData.job_site_id || null,
-      client_id: formData.client_id || null,
-      subtotal_before_gst: formData.subtotal_before_gst,
-      gst_paid: formData.gst_paid,
-      total_paid: totalPaid,
-      business_use_percent: formData.business_use_percent,
-      deductible_amount: deductibleAmount,
-      itc_claim_amount: itcClaimAmount,
-      payment_method: formData.payment_method || null,
-      tax_confidence_status: formData.tax_confidence_status,
-      home_office_related: formData.home_office_related,
-      needs_receipt: true,
-      receipt_uploaded: !!receiptFile || !!receiptUrl,
+      document_type: formData.document_type || null,
+      title: formData.title || file.name,
+      file_url: filePath,
       notes: formData.notes || null,
-    };
+    });
 
-    if (receiptUrl) record.receipt_url = receiptUrl;
-
-    if (editingId) {
-      await supabase.from('expenses').update(record).eq('id', editingId);
-    } else {
-      await supabase.from('expenses').insert(record);
-    }
     setShowForm(false);
-    setEditingId(null);
-    resetForm();
-    loadData();
+    setFormData({ document_type: '', title: '', notes: '' });
+    setFile(null);
+    setUploading(false);
+    loadDocuments();
   }
 
-  function resetForm() {
-    setFormData({
-      expense_date: format(new Date(), 'yyyy-MM-dd'),
-      vendor: '', category: '', subcategory: '', description: '',
-      job_site_id: '', client_id: '',
-      subtotal_before_gst: 0, gst_paid: 0, business_use_percent: 100,
-      payment_method: '', tax_confidence_status: 'clear', notes: '',
-      home_office_related: false,
-    });
-    setReceiptFile(null);
+  async function deleteDocument(doc: Document) {
+    if (!confirm('Delete this document?')) return;
+    await supabase.from('documents').delete().eq('id', doc.id);
+    loadDocuments();
   }
 
-  function editExpense(exp: Expense) {
-    setFormData({
-      expense_date: exp.expense_date,
-      vendor: exp.vendor || '',
-      category: exp.category || '',
-      subcategory: '',
-      description: exp.description || '',
-      job_site_id: exp.job_site_id || '',
-      client_id: (exp as any).client_id || '',
-      subtotal_before_gst: exp.subtotal_before_gst,
-      gst_paid: exp.gst_paid,
-      business_use_percent: exp.business_use_percent,
-      payment_method: (exp as any).payment_method || '',
-      tax_confidence_status: (exp as any).tax_confidence_status || 'clear',
-      notes: exp.notes || '',
-      home_office_related: (exp as any).home_office_related || false,
-    });
-    setEditingId(exp.id);
-    setShowForm(true);
-  }
+  const docItems: UnifiedItem[] = documents.map(d => ({
+    id: d.id,
+    title: d.title || 'Untitled',
+    label: d.document_type || 'Other',
+    path: d.file_url,
+    date: d.uploaded_at,
+    notes: d.notes,
+    canDelete: true,
+    source: 'document',
+    rawDoc: d,
+  }));
 
-  const filtered = filterCategory === 'all' ? expenses : expenses.filter(e => e.category === filterCategory);
-  const totalExpenses = filtered.reduce((s, e) => s + e.total_paid, 0);
-  const totalDeductible = filtered.reduce((s, e) => s + e.deductible_amount, 0);
+  const receiptItems: UnifiedItem[] = expensesWithReceipts.map(e => ({
+    id: e.id,
+    title: [e.vendor, e.category, e.description].filter(Boolean).join(' • ') || 'Expense Receipt',
+    label: 'Receipt',
+    path: e.receipt_url,
+    date: e.expense_date,
+    notes: e.notes,
+    canDelete: false,
+    source: 'expense',
+  }));
 
-  const taxStatusLabel = (status: string) => {
-    if (status === 'needs_review') return { label: 'Needs Review', color: 'text-amber-600 dark:text-amber-400' };
-    if (status === 'ask_accountant') return { label: 'Ask Accountant', color: 'text-red-600 dark:text-red-400' };
-    return { label: 'Clear', color: 'text-emerald-600 dark:text-emerald-400' };
+  const allItems = [...docItems, ...receiptItems].sort(
+    (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
+  );
+
+  const filtered = filterType === 'all' ? allItems : allItems.filter(i => i.label === filterType);
+
+  const labelColors: Record<string, string> = {
+    'Receipt': 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300',
+    'Invoice PDF': 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300',
+    'WCB document': 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300',
+    'GST / CRA document': 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300',
+    'Contract': 'bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300',
+    'Job site photo': 'bg-pink-100 dark:bg-pink-900/30 text-pink-700 dark:text-pink-300',
+    'Other': 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400',
   };
 
   if (loading) return (
@@ -223,354 +185,173 @@ export function ExpensesPage() {
     <div>
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Expenses</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            Total: ${totalExpenses.toFixed(2)} | Deductible: ${totalDeductible.toFixed(2)}
-          </p>
+          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Documents</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400">{allItems.length} files total</p>
         </div>
         <button
-          onClick={() => { resetForm(); setEditingId(null); setShowForm(true); }}
+          onClick={() => setShowForm(true)}
           className="flex items-center gap-1.5 px-3 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium rounded-lg transition-colors"
         >
-          <Plus className="w-4 h-4" /> Add Expense
+          <Upload className="w-4 h-4" /> Upload
         </button>
       </div>
 
-      {/* Category filter */}
-      <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
+      {/* Filters */}
+      <div className="flex gap-2 mb-4 overflow-x-auto">
         <button
-          onClick={() => setFilterCategory('all')}
-          className={`px-3 py-1.5 text-xs font-medium rounded-lg whitespace-nowrap ${filterCategory === 'all' ? 'bg-teal-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700'}`}
+          onClick={() => setFilterType('all')}
+          className={`px-3 py-1.5 text-sm font-medium rounded-lg whitespace-nowrap ${filterType === 'all' ? 'bg-teal-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700'}`}
         >
-          All
+          All ({allItems.length})
         </button>
-        {EXPENSE_CATEGORY_DATA.map(c => (
-          <button
-            key={c.name}
-            onClick={() => setFilterCategory(c.name)}
-            className={`px-3 py-1.5 text-xs font-medium rounded-lg whitespace-nowrap ${filterCategory === c.name ? 'bg-teal-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700'}`}
-          >
-            {c.name}
-          </button>
-        ))}
+        {DOCUMENT_TYPES.map(t => {
+          const count = allItems.filter(i => i.label === t).length;
+          if (count === 0) return null;
+          return (
+            <button
+              key={t}
+              onClick={() => setFilterType(t)}
+              className={`px-3 py-1.5 text-sm font-medium rounded-lg whitespace-nowrap ${filterType === t ? 'bg-teal-600 text-white' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border border-gray-200 dark:border-gray-700'}`}
+            >
+              {t} ({count})
+            </button>
+          );
+        })}
       </div>
 
-      {/* Preview Modal */}
-      {previewExpense && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-          <div className="bg-white dark:bg-gray-800 rounded-xl w-full max-w-md max-h-[90vh] overflow-y-auto shadow-xl">
-            <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Expense Details</h2>
-              <button onClick={() => setPreviewExpense(null)} className="p-1 text-gray-400 hover:text-gray-600">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="p-4 space-y-4">
-
-              <div>
-                <p className="text-xl font-bold text-gray-900 dark:text-white">
-                  {previewExpense.vendor || previewExpense.category || 'Expense'}
-                </p>
-                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                  {format(new Date(previewExpense.expense_date + 'T00:00'), 'MMMM d, yyyy')}
-                </p>
-                {previewExpense.category && (
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    {previewExpense.category}{previewExpense.description ? ` • ${previewExpense.description}` : ''}
-                  </p>
-                )}
-                {(previewExpense as any).job_sites?.site_name && (
-                  <p className="text-sm text-gray-500 dark:text-gray-400">
-                    Job Site: {(previewExpense as any).job_sites.site_name}
-                  </p>
-                )}
-              </div>
-
-              <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-500 dark:text-gray-400">Before GST</span>
-                  <span className="font-medium text-gray-900 dark:text-white">${previewExpense.subtotal_before_gst.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-500 dark:text-gray-400">GST Paid</span>
-                  <span className="font-medium text-gray-900 dark:text-white">${previewExpense.gst_paid.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between text-sm font-bold border-t border-gray-200 dark:border-gray-600 pt-2">
-                  <span className="text-gray-900 dark:text-white">Total Paid</span>
-                  <span className="text-teal-600 dark:text-teal-400">${previewExpense.total_paid.toFixed(2)}</span>
-                </div>
-              </div>
-
-              <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 space-y-2">
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-500 dark:text-gray-400">Business Use</span>
-                  <span className="font-medium text-gray-900 dark:text-white">{previewExpense.business_use_percent}%</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-500 dark:text-gray-400">Deductible Amount</span>
-                  <span className="font-medium text-gray-900 dark:text-white">${previewExpense.deductible_amount.toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-gray-500 dark:text-gray-400">GST ITC Claim</span>
-                  <span className="font-medium text-gray-900 dark:text-white">${previewExpense.itc_claim_amount.toFixed(2)}</span>
-                </div>
-              </div>
-
-              <div className="flex gap-3">
-                {(previewExpense as any).payment_method && (
-                  <div className="flex-1 bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Payment Method</p>
-                    <p className="text-sm font-medium text-gray-900 dark:text-white">{(previewExpense as any).payment_method}</p>
-                  </div>
-                )}
-                <div className="flex-1 bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Tax Status</p>
-                  <p className={`text-sm font-medium ${taxStatusLabel((previewExpense as any).tax_confidence_status || 'clear').color}`}>
-                    {taxStatusLabel((previewExpense as any).tax_confidence_status || 'clear').label}
-                  </p>
-                </div>
-              </div>
-
-              {previewExpense.notes && (
-                <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">Notes</p>
-                  <p className="text-sm text-gray-700 dark:text-gray-300">{previewExpense.notes}</p>
-                </div>
-              )}
-
-              {/* Receipt — usa signed URL via ReceiptPreview */}
-              {previewExpense.receipt_url && (
-                <div>
-                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Receipt</p>
-                  <ReceiptPreview path={previewExpense.receipt_url} />
-                </div>
-              )}
-
-              <div className="flex gap-3 pt-2">
-                <button
-                  onClick={() => setPreviewExpense(null)}
-                  className="flex-1 py-2.5 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 font-medium rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-                >
-                  Close
-                </button>
-                <button
-                  onClick={() => { editExpense(previewExpense); setPreviewExpense(null); }}
-                  className="flex-1 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2"
-                >
-                  <Pencil className="w-4 h-4" /> Edit
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Form Modal */}
+      {/* Upload Modal */}
       {showForm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-          <div className="bg-white dark:bg-gray-800 rounded-xl w-full max-w-md max-h-[90vh] overflow-y-auto shadow-xl">
+          <div className="bg-white dark:bg-gray-800 rounded-xl w-full max-w-md shadow-xl">
             <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                {editingId ? 'Edit Expense' : 'Add Expense'}
-              </h2>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Upload Document</h2>
               <button onClick={() => setShowForm(false)} className="p-1 text-gray-400 hover:text-gray-600">
                 <X className="w-5 h-5" />
               </button>
             </div>
             <form onSubmit={handleSubmit} className="p-4 space-y-4">
-
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">What type of expense is this?</label>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Type</label>
                 <select
-                  value={formData.category}
-                  onChange={e => onCategoryChange(e.target.value)}
+                  value={formData.document_type}
+                  onChange={e => setFormData(f => ({ ...f, document_type: e.target.value }))}
                   className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                 >
-                  <option value="">Select category...</option>
-                  {EXPENSE_CATEGORY_DATA.map(c => <option key={c.name} value={c.name}>{c.name}</option>)}
+                  <option value="">Select type...</option>
+                  {DOCUMENT_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
                 </select>
               </div>
-
-              {formData.category && selectedCategoryData && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Subcategory</label>
-                  <select
-                    value={formData.subcategory}
-                    onChange={e => onSubcategoryChange(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                  >
-                    <option value="">Select subcategory...</option>
-                    {selectedCategoryData.subcategories.map(s => <option key={s.name} value={s.name}>{s.name}</option>)}
-                  </select>
-                  {selectedSubcategoryData?.helperText && (
-                    <p className="mt-1 text-xs text-amber-600 dark:text-amber-400 flex items-start gap-1">
-                      <AlertTriangle className="w-3 h-3 mt-0.5 flex-shrink-0" />
-                      {selectedSubcategoryData.helperText}
-                    </p>
-                  )}
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Date</label>
-                  <input type="date" value={formData.expense_date} onChange={e => setFormData(f => ({ ...f, expense_date: e.target.value }))} required className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Vendor</label>
-                  <input type="text" value={formData.vendor} onChange={e => setFormData(f => ({ ...f, vendor: e.target.value }))} placeholder="Store name" className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
-                </div>
-              </div>
-
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description</label>
-                <input type="text" value={formData.description} onChange={e => setFormData(f => ({ ...f, description: e.target.value }))} placeholder="What did you buy?" className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Title</label>
+                <input
+                  type="text"
+                  value={formData.title}
+                  onChange={e => setFormData(f => ({ ...f, title: e.target.value }))}
+                  placeholder="Document name"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                />
               </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Client (optional)</label>
-                  <select value={formData.client_id} onChange={e => setFormData(f => ({ ...f, client_id: e.target.value }))} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
-                    <option value="">None</option>
-                    {clients.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Job Site (optional)</label>
-                  <select value={formData.job_site_id} onChange={e => setFormData(f => ({ ...f, job_site_id: e.target.value }))} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
-                    <option value="">None</option>
-                    {jobSites.map(s => <option key={s.id} value={s.id}>{s.site_name}</option>)}
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Amount (before GST)</label>
-                  <input type="number" value={formData.subtotal_before_gst || ''} onChange={e => setFormData(f => ({ ...f, subtotal_before_gst: parseFloat(e.target.value) || 0 }))} min={0} step={0.01} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">GST Paid</label>
-                  <input type="number" value={formData.gst_paid || ''} onChange={e => setFormData(f => ({ ...f, gst_paid: parseFloat(e.target.value) || 0 }))} min={0} step={0.01} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
-                </div>
-              </div>
-
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Business Use %</label>
-                <input type="number" value={formData.business_use_percent} onChange={e => setFormData(f => ({ ...f, business_use_percent: parseFloat(e.target.value) || 100 }))} min={0} max={100} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
-                <p className="text-xs text-gray-400 mt-1">Only claim the business-use portion.</p>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">File</label>
+                <input
+                  type="file"
+                  onChange={e => setFile(e.target.files?.[0] || null)}
+                  required
+                  className="w-full text-sm text-gray-500 file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-teal-50 file:text-teal-700 hover:file:bg-teal-100 dark:file:bg-teal-900/20 dark:file:text-teal-300"
+                />
               </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Payment Method</label>
-                  <select value={formData.payment_method} onChange={e => setFormData(f => ({ ...f, payment_method: e.target.value }))} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
-                    <option value="">Select...</option>
-                    {PAYMENT_METHODS.map(m => <option key={m} value={m}>{m}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Tax Confidence</label>
-                  <select value={formData.tax_confidence_status} onChange={e => setFormData(f => ({ ...f, tax_confidence_status: e.target.value }))} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
-                    {TAX_CONFIDENCE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                  </select>
-                </div>
-              </div>
-
-              <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 text-sm space-y-1">
-                <div className="flex justify-between text-gray-600 dark:text-gray-400">
-                  <span>Total paid:</span>
-                  <span className="font-medium">${(formData.subtotal_before_gst + formData.gst_paid).toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between text-gray-600 dark:text-gray-400">
-                  <span>Deductible amount:</span>
-                  <span className="font-medium">${(formData.subtotal_before_gst * formData.business_use_percent / 100).toFixed(2)}</span>
-                </div>
-                <div className="flex justify-between text-gray-600 dark:text-gray-400">
-                  <span>GST ITC claim:</span>
-                  <span className="font-medium">${(formData.gst_paid * formData.business_use_percent / 100).toFixed(2)}</span>
-                </div>
-              </div>
-
-              {/* Current receipt when editing — usa ReceiptPreview con signed URL */}
-              {editingId && (() => {
-                const currentExp = expenses.find(e => e.id === editingId);
-                if (!currentExp?.receipt_url) return null;
-                return (
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400 mb-2">Current Receipt</p>
-                    <ReceiptPreview
-                      path={currentExp.receipt_url}
-                      className="w-full max-h-48 object-cover rounded-lg border border-gray-200 dark:border-gray-700 hover:opacity-90 transition-opacity"
-                    />
-                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">Select a new file below to replace it</p>
-                  </div>
-                );
-              })()}
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  {editingId ? 'Replace Receipt (optional)' : 'Receipt / Photo'}
-                </label>
-                <label className="flex items-center gap-2 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 text-sm text-gray-600 dark:text-gray-400">
-                  <Upload className="w-4 h-4" />
-                  {receiptFile ? receiptFile.name : 'Choose file'}
-                  <input type="file" onChange={e => setReceiptFile(e.target.files?.[0] || null)} className="hidden" accept="image/*,.pdf" />
-                </label>
-              </div>
-
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Notes</label>
-                <textarea value={formData.notes} onChange={e => setFormData(f => ({ ...f, notes: e.target.value }))} rows={2} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+                <textarea
+                  value={formData.notes}
+                  onChange={e => setFormData(f => ({ ...f, notes: e.target.value }))}
+                  rows={2}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                />
               </div>
-
-              <button type="submit" disabled={uploading} className="w-full py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-medium rounded-lg transition-colors disabled:opacity-50">
-                {uploading ? 'Uploading...' : editingId ? 'Update' : 'Save Expense'}
+              <button
+                type="submit"
+                disabled={!file || uploading}
+                className="w-full py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-medium rounded-lg transition-colors disabled:opacity-50"
+              >
+                {uploading ? 'Uploading...' : 'Upload'}
               </button>
-
-              <p className="text-xs text-gray-400 dark:text-gray-500 text-center italic">
-                This is an estimate only, not official tax advice.
-              </p>
             </form>
           </div>
         </div>
       )}
 
-      {/* Expense list */}
+      {/* Document list */}
       <div className="space-y-2">
         {filtered.length === 0 ? (
           <div className="text-center py-12 text-gray-400 dark:text-gray-500">
-            <Receipt className="w-10 h-10 mx-auto mb-2 opacity-50" />
-            <p>No expenses recorded</p>
+            <FolderOpen className="w-10 h-10 mx-auto mb-2 opacity-50" />
+            <p>No documents found</p>
           </div>
-        ) : filtered.map(exp => (
-          <div
-            key={exp.id}
-            onClick={() => setPreviewExpense(exp)}
-            className="bg-white dark:bg-gray-800 rounded-lg border border-gray-100 dark:border-gray-700 p-3 cursor-pointer hover:border-teal-300 dark:hover:border-teal-700 transition-colors"
-          >
-            <div className="flex items-center justify-between">
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-gray-900 dark:text-white truncate">
-                    {exp.vendor || exp.description || 'Expense'}
-                  </span>
-                  {(exp as any).tax_confidence_status === 'needs_review' && <AlertTriangle className="w-3.5 h-3.5 text-amber-500 flex-shrink-0" />}
-                  {(exp as any).tax_confidence_status === 'ask_accountant' && <AlertTriangle className="w-3.5 h-3.5 text-red-500 flex-shrink-0" />}
-                  {exp.receipt_url && <Receipt className="w-3 h-3 text-teal-500 flex-shrink-0" />}
+        ) : filtered.map(item => {
+          const bucket = getBucket(item.label);
+          return (
+            <div
+              key={`${item.source}-${item.id}`}
+              className="bg-white dark:bg-gray-800 rounded-lg border border-gray-100 dark:border-gray-700 p-3"
+            >
+              <div className="flex items-start gap-3">
+
+                {item.path
+                  ? <ItemThumbnail path={item.path} bucket={bucket} />
+                  : (
+                    <div className="w-8 h-8 rounded-md bg-gray-100 dark:bg-gray-700 flex items-center justify-center flex-shrink-0">
+                      <FileText className="w-4 h-4 text-gray-400" />
+                    </div>
+                  )
+                }
+
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-sm font-medium text-gray-900 dark:text-white truncate">
+                      {item.title}
+                    </span>
+                    <span className={`text-xs font-medium px-2 py-0.5 rounded-full flex-shrink-0 ${labelColors[item.label] || labelColors['Other']}`}>
+                      {item.label}
+                    </span>
+                    {item.source === 'expense' && (
+                      <span className="text-xs text-gray-400 dark:text-gray-500 flex-shrink-0">
+                        from Expenses
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                    {format(new Date(item.date + (item.date.includes('T') ? '' : 'T00:00')), 'MMM d, yyyy')}
+                  </p>
+                  {item.notes && (
+                    <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5 truncate">{item.notes}</p>
+                  )}
                 </div>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                  {format(new Date(exp.expense_date + 'T00:00'), 'MMM d')} • {exp.category || 'Uncategorized'}
-                  {exp.description && ` • ${exp.description}`}
-                </p>
-              </div>
-              <div className="text-right ml-3">
-                <p className="text-sm font-semibold text-gray-900 dark:text-white">${exp.total_paid.toFixed(2)}</p>
-                <p className="text-xs text-gray-400">{exp.business_use_percent}% biz</p>
+
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  {item.path && (
+                    <OpenFileButton
+                      path={item.path}
+                      bucket={bucket}
+                      className="p-1.5 text-gray-400 hover:text-teal-600 transition-colors disabled:opacity-30"
+                    >
+                      <ExternalLink className="w-4 h-4" />
+                    </OpenFileButton>
+                  )}
+                  {item.canDelete && item.rawDoc && (
+                    <button
+                      onClick={() => deleteDocument(item.rawDoc!)}
+                      className="text-xs text-red-400 hover:text-red-600 transition-colors"
+                    >
+                      Delete
+                    </button>
+                  )}
+                </div>
+
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
