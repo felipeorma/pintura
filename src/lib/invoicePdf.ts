@@ -71,7 +71,6 @@ export function generateInvoicePdf(
       color: #1f2937;
       line-height: 1.5;
       width: 816px;
-      min-height: 1056px;
       background: #ffffff;
     }
     @page {
@@ -84,125 +83,119 @@ export function generateInvoicePdf(
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
       }
-      * { page-break-inside: avoid; }
     }
   </style>
 </head>
 <body>
 
-  <!-- Top accent bar -->
-  <div style="width: 100%; height: 6px; background: linear-gradient(90deg, #0d9488 0%, #0891b2 100%);"></div>
+  <div style="width: 816px; padding: 0; border-top: 6px solid #0d9488; border-bottom: 4px solid #0891b2;">
+    <div style="padding: 40px 56px 36px 56px;">
 
-  <div style="width: 816px; min-height: 1050px; padding: 44px 56px 40px 56px;">
-
-    <!-- Header -->
-    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 44px;">
-      <div>
-        <h1 style="font-size: 36px; font-weight: 800; color: #0d9488; letter-spacing: -1px; line-height: 1;">INVOICE</h1>
-        <p style="font-size: 13px; color: #9ca3af; margin-top: 6px; letter-spacing: 0.3px;">${invoice.invoice_number}</p>
-      </div>
-      <div style="text-align: right;">
-        <p style="font-size: 17px; font-weight: 700; color: #111827;">${profile.business_name || profile.full_name}</p>
-        ${profile.full_name && profile.business_name ? `<p style="font-size: 13px; color: #6b7280; margin-top: 2px;">${profile.full_name}</p>` : ''}
-        ${profile.home_address ? `<p style="font-size: 13px; color: #6b7280;">${profile.home_address}</p>` : ''}
-        ${profile.city ? `<p style="font-size: 13px; color: #6b7280;">${profile.city}${profile.province ? ', ' + profile.province : ''}</p>` : ''}
-        ${profile.phone ? `<p style="font-size: 13px; color: #6b7280; margin-top: 4px;">${profile.phone}</p>` : ''}
-        ${profile.email ? `<p style="font-size: 13px; color: #6b7280;">${profile.email}</p>` : ''}
-        ${profile.gst_number ? `<p style="font-size: 12px; color: #9ca3af; margin-top: 4px;">GST # ${profile.gst_number}</p>` : ''}
-      </div>
-    </div>
-
-    <!-- Divider -->
-    <div style="height: 1px; background: #e5e7eb; margin-bottom: 28px;"></div>
-
-    <!-- Bill To + Dates -->
-    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 36px;">
-      <div style="background: #f9fafb; border-radius: 10px; padding: 20px 24px; min-width: 220px;">
-        <p style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #9ca3af; margin-bottom: 8px;">Bill To</p>
-        <p style="font-size: 15px; font-weight: 700; color: #111827;">${client.name}</p>
-        ${client.contact_name ? `<p style="font-size: 13px; color: #6b7280; margin-top: 2px;">${client.contact_name}</p>` : ''}
-        ${client.email ? `<p style="font-size: 13px; color: #6b7280;">${client.email}</p>` : ''}
-        ${client.phone ? `<p style="font-size: 13px; color: #6b7280;">${client.phone}</p>` : ''}
-      </div>
-
-      <div style="display: flex; gap: 32px; text-align: right;">
+      <!-- Header -->
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 36px;">
         <div>
-          <p style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #9ca3af; margin-bottom: 4px;">Invoice Date</p>
-          <p style="font-size: 14px; color: #111827; font-weight: 500;">${formatDate(invoice.invoice_date)}</p>
+          <h1 style="font-size: 36px; font-weight: 800; color: #0d9488; letter-spacing: -1px; line-height: 1;">INVOICE</h1>
+          <p style="font-size: 13px; color: #9ca3af; margin-top: 6px; letter-spacing: 0.3px;">${invoice.invoice_number}</p>
         </div>
-        ${invoice.due_date ? `
-        <div>
-          <p style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #9ca3af; margin-bottom: 4px;">Due Date</p>
-          <p style="font-size: 14px; color: #111827; font-weight: 500;">${formatDate(invoice.due_date)}</p>
+        <div style="text-align: right;">
+          <p style="font-size: 17px; font-weight: 700; color: #111827;">${profile.business_name || profile.full_name}</p>
+          ${profile.full_name && profile.business_name ? `<p style="font-size: 13px; color: #6b7280; margin-top: 2px;">${profile.full_name}</p>` : ''}
+          ${profile.home_address ? `<p style="font-size: 13px; color: #6b7280;">${profile.home_address}</p>` : ''}
+          ${profile.city ? `<p style="font-size: 13px; color: #6b7280;">${profile.city}${profile.province ? ', ' + profile.province : ''}</p>` : ''}
+          ${profile.phone ? `<p style="font-size: 13px; color: #6b7280; margin-top: 4px;">${profile.phone}</p>` : ''}
+          ${profile.email ? `<p style="font-size: 13px; color: #6b7280;">${profile.email}</p>` : ''}
+          ${profile.gst_number ? `<p style="font-size: 12px; color: #9ca3af; margin-top: 4px;">GST # ${profile.gst_number}</p>` : ''}
+        </div>
+      </div>
+
+      <!-- Divider -->
+      <div style="height: 1px; background: #e5e7eb; margin-bottom: 24px;"></div>
+
+      <!-- Bill To + Dates -->
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 28px;">
+        <div style="background: #f9fafb; border-radius: 10px; padding: 18px 22px; min-width: 200px;">
+          <p style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #9ca3af; margin-bottom: 6px;">Bill To</p>
+          <p style="font-size: 15px; font-weight: 700; color: #111827;">${client.name}</p>
+          ${client.contact_name ? `<p style="font-size: 13px; color: #6b7280; margin-top: 2px;">${client.contact_name}</p>` : ''}
+          ${client.email ? `<p style="font-size: 13px; color: #6b7280;">${client.email}</p>` : ''}
+          ${client.phone ? `<p style="font-size: 13px; color: #6b7280;">${client.phone}</p>` : ''}
+        </div>
+        <div style="display: flex; gap: 32px; text-align: right;">
+          <div>
+            <p style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #9ca3af; margin-bottom: 4px;">Invoice Date</p>
+            <p style="font-size: 14px; color: #111827; font-weight: 500;">${formatDate(invoice.invoice_date)}</p>
+          </div>
+          ${invoice.due_date ? `
+          <div>
+            <p style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #9ca3af; margin-bottom: 4px;">Due Date</p>
+            <p style="font-size: 14px; color: #111827; font-weight: 500;">${formatDate(invoice.due_date)}</p>
+          </div>
+          ` : ''}
+        </div>
+      </div>
+
+      <!-- Items Table -->
+      <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px;">
+        <thead>
+          <tr style="background: #111827;">
+            <th style="padding: 11px 14px; text-align: left; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #9ca3af;">Date</th>
+            <th style="padding: 11px 14px; text-align: left; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #9ca3af;">Description</th>
+            <th style="padding: 11px 14px; text-align: center; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #9ca3af;">Hrs</th>
+            <th style="padding: 11px 14px; text-align: right; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #9ca3af;">Rate</th>
+            <th style="padding: 11px 14px; text-align: right; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #9ca3af;">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${itemRows}
+        </tbody>
+      </table>
+
+      <!-- Totals -->
+      <div style="display: flex; justify-content: flex-end; margin-bottom: 28px;">
+        <div style="width: 260px;">
+          <div style="display: flex; justify-content: space-between; padding: 8px 0; font-size: 13px; border-bottom: 1px solid #f3f4f6;">
+            <span style="color: #6b7280;">Subtotal</span>
+            <span style="color: #374151; font-weight: 500;">${formatCurrency(invoice.subtotal)}</span>
+          </div>
+          ${invoice.gst_amount > 0 ? `
+          <div style="display: flex; justify-content: space-between; padding: 8px 0; font-size: 13px; border-bottom: 1px solid #f3f4f6;">
+            <span style="color: #6b7280;">GST (${profile.gst_rate || 5}%)</span>
+            <span style="color: #374151; font-weight: 500;">${formatCurrency(invoice.gst_amount)}</span>
+          </div>
+          ` : ''}
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; padding: 14px 16px; background: #0d9488; border-radius: 8px;">
+            <span style="font-size: 14px; font-weight: 700; color: #ffffff;">Total Due</span>
+            <span style="font-size: 20px; font-weight: 800; color: #ffffff;">${formatCurrency(invoice.total_amount)}</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Notes / Payment Instructions -->
+      ${invoice.notes || profile.payment_instructions ? `
+      <div style="border-top: 1px solid #e5e7eb; padding-top: 20px; display: flex; gap: 40px; margin-bottom: 24px;">
+        ${invoice.notes ? `
+        <div style="flex: 1;">
+          <p style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #9ca3af; margin-bottom: 6px;">Notes</p>
+          <p style="font-size: 13px; color: #4b5563; line-height: 1.6;">${invoice.notes}</p>
+        </div>
+        ` : ''}
+        ${profile.payment_instructions ? `
+        <div style="flex: 1;">
+          <p style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #9ca3af; margin-bottom: 6px;">Payment Instructions</p>
+          <p style="font-size: 13px; color: #4b5563; white-space: pre-line; line-height: 1.6;">${profile.payment_instructions}</p>
         </div>
         ` : ''}
       </div>
-    </div>
-
-    <!-- Items Table -->
-    <table style="width: 100%; border-collapse: collapse; margin-bottom: 28px; border-radius: 10px; overflow: hidden;">
-      <thead>
-        <tr style="background: #111827;">
-          <th style="padding: 12px 14px; text-align: left; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #9ca3af;">Date</th>
-          <th style="padding: 12px 14px; text-align: left; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #9ca3af;">Description</th>
-          <th style="padding: 12px 14px; text-align: center; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #9ca3af;">Hrs</th>
-          <th style="padding: 12px 14px; text-align: right; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #9ca3af;">Rate</th>
-          <th style="padding: 12px 14px; text-align: right; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #9ca3af;">Amount</th>
-        </tr>
-      </thead>
-      <tbody>
-        ${itemRows}
-      </tbody>
-    </table>
-
-    <!-- Totals -->
-    <div style="display: flex; justify-content: flex-end; margin-bottom: 36px;">
-      <div style="width: 260px;">
-        <div style="display: flex; justify-content: space-between; padding: 8px 0; font-size: 13px; border-bottom: 1px solid #f3f4f6;">
-          <span style="color: #6b7280;">Subtotal</span>
-          <span style="color: #374151; font-weight: 500;">${formatCurrency(invoice.subtotal)}</span>
-        </div>
-        ${invoice.gst_amount > 0 ? `
-        <div style="display: flex; justify-content: space-between; padding: 8px 0; font-size: 13px; border-bottom: 1px solid #f3f4f6;">
-          <span style="color: #6b7280;">GST (${profile.gst_rate || 5}%)</span>
-          <span style="color: #374151; font-weight: 500;">${formatCurrency(invoice.gst_amount)}</span>
-        </div>
-        ` : ''}
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; padding: 14px 16px; background: linear-gradient(135deg, #0d9488 0%, #0891b2 100%); border-radius: 8px;">
-          <span style="font-size: 14px; font-weight: 700; color: #ffffff;">Total Due</span>
-          <span style="font-size: 20px; font-weight: 800; color: #ffffff;">${formatCurrency(invoice.total_amount)}</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- Notes / Payment Instructions -->
-    ${invoice.notes || profile.payment_instructions ? `
-    <div style="border-top: 1px solid #e5e7eb; padding-top: 24px; display: flex; gap: 40px;">
-      ${invoice.notes ? `
-      <div style="flex: 1;">
-        <p style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #9ca3af; margin-bottom: 6px;">Notes</p>
-        <p style="font-size: 13px; color: #4b5563; line-height: 1.6;">${invoice.notes}</p>
-      </div>
       ` : ''}
-      ${profile.payment_instructions ? `
-      <div style="flex: 1;">
-        <p style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #9ca3af; margin-bottom: 6px;">Payment Instructions</p>
-        <p style="font-size: 13px; color: #4b5563; white-space: pre-line; line-height: 1.6;">${profile.payment_instructions}</p>
+
+      <!-- Footer -->
+      <div style="border-top: 1px solid #f3f4f6; padding-top: 16px; display: flex; justify-content: space-between; align-items: center;">
+        <p style="font-size: 12px; color: #d1d5db;">Thank you for your business.</p>
+        <p style="font-size: 11px; color: #d1d5db;">${invoice.invoice_number}</p>
       </div>
-      ` : ''}
-    </div>
-    ` : ''}
 
-    <!-- Footer -->
-    <div style="margin-top: auto; padding-top: 40px; display: flex; justify-content: space-between; align-items: center;">
-      <p style="font-size: 12px; color: #d1d5db;">Thank you for your business.</p>
-      <p style="font-size: 11px; color: #d1d5db;">${invoice.invoice_number}</p>
     </div>
-
   </div>
-
-  <!-- Bottom accent bar -->
-  <div style="width: 100%; height: 4px; background: linear-gradient(90deg, #0d9488 0%, #0891b2 100%);"></div>
 
 </body>
 </html>`;
