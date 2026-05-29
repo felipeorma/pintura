@@ -453,7 +453,7 @@ export function ExpensesPage() {
                         />
                       </a>
                     ) : (
-                      
+                      </a>
                         href={currentExp.receipt_url}
                         target="_blank"
                         rel="noopener noreferrer"
