@@ -63,7 +63,7 @@ export function generateInvoicePdf(
 <html>
 <head>
   <meta charset="utf-8">
-  <title>Invoice ${invoice.invoice_number}</title>
+  <title>Felipe Invoice - ${client.name.replace(/[^a-zA-Z0-9 ]/g, '').trim()} - ${formatDate(invoice.invoice_date)}</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
