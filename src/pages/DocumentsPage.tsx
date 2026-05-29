@@ -256,7 +256,7 @@ export function DocumentsPage() {
                     target="_blank"
                     rel="noopener noreferrer"
                     className="p-1.5 text-gray-400 hover:text-teal-600 transition-colors"
-                    onClick={e => e.stopPropagation()}
+                    onClick={(e) => e.stopPropagation()}
                   >
                     <ExternalLink className="w-4 h-4" />
                   </a>
