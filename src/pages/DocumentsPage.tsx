@@ -36,7 +36,7 @@ function ReceiptPreview({ path, className }: { path: string; className?: string 
   }
 
   return (
-    
+    <a
       href={url}
       target="_blank"
       rel="noopener noreferrer"
