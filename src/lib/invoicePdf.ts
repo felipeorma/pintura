@@ -65,11 +65,30 @@ export function generateInvoicePdf(
   <meta charset="utf-8">
   <title>Invoice ${invoice.invoice_number}</title>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1f2937; line-height: 1.5; }
-    @page { size: letter; margin: 0; }
-    @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
-  </style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1f2937; line-height: 1.5; }
+  @page {
+    size: letter portrait;
+    margin: 0;
+  }
+  @media print {
+    html, body {
+      width: 100%;
+      height: 100%;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    body > div {
+      /* Escala el contenido para que quepa siempre en 1 página */
+      transform-origin: top left;
+      transform: scale(var(--print-scale, 1));
+      width: calc(100% / var(--print-scale, 1));
+    }
+    /* Evita que se parta en múltiples páginas */
+    table { page-break-inside: avoid; }
+    tr { page-break-inside: avoid; }
+  }
+</style>
 </head>
 <body>
   <div style="max-width: 800px; margin: 0 auto; padding: 48px;">
