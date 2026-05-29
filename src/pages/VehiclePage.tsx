@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import type { Client, JobSite } from '../lib/types';
-import { Plus, X, MapPin } from 'lucide-react';
+import { Plus, X, MapPin, Pencil, Trash2 } from 'lucide-react';
 import { format, startOfMonth, endOfMonth, startOfYear, endOfYear } from 'date-fns';
 
 interface Vehicle {
@@ -44,6 +44,12 @@ export function VehiclePage() {
   const [showVehicleForm, setShowVehicleForm] = useState(false);
   const [showLogForm, setShowLogForm] = useState(false);
   const [editingVehicleId, setEditingVehicleId] = useState<string | null>(null);
+  const [editingLogId, setEditingLogId] = useState<string | null>(null);
+  const [deleteLogConfirm, setDeleteLogConfirm] = useState<MileageLog | null>(null);
+
+  // Date filter
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
 
   const [vehicleForm, setVehicleForm] = useState({
     vehicle_name: '', year: '', make: '', model: '',
@@ -72,7 +78,7 @@ export function VehiclePage() {
   async function loadData() {
     const [vRes, lRes, cRes, sRes] = await Promise.all([
       supabase.from('vehicles').select('*').eq('user_id', user!.id).order('active', { ascending: false }),
-      supabase.from('mileage_logs').select('*, clients(name), job_sites(site_name)').eq('user_id', user!.id).order('log_date', { ascending: false }).limit(100),
+      supabase.from('mileage_logs').select('*, clients(name), job_sites(site_name)').eq('user_id', user!.id).order('log_date', { ascending: false }).limit(200),
       supabase.from('clients').select('*').eq('user_id', user!.id).eq('active', true).order('name'),
       supabase.from('job_sites').select('*').eq('user_id', user!.id).eq('active', true).order('site_name'),
     ]);
@@ -137,7 +143,7 @@ export function VehiclePage() {
 
   async function handleLogSubmit(e: React.FormEvent) {
     e.preventDefault();
-    await supabase.from('mileage_logs').insert({
+    const record = {
       user_id: user!.id,
       log_date: logForm.log_date,
       vehicle_id: logForm.vehicle_id || null,
@@ -148,11 +154,51 @@ export function VehiclePage() {
       purpose: logForm.purpose || null,
       km_driven: parseFloat(logForm.km_driven) || 0,
       notes: logForm.notes || null,
-    });
+    };
+
+    if (editingLogId) {
+      await supabase.from('mileage_logs').update(record).eq('id', editingLogId);
+    } else {
+      await supabase.from('mileage_logs').insert(record);
+    }
+
+    closeLogForm();
+    loadData();
+  }
+
+  function closeLogForm() {
     setShowLogForm(false);
-    setLogForm({ log_date: format(new Date(), 'yyyy-MM-dd'), vehicle_id: '', client_id: '', job_site_id: '', start_location: '', destination: '', purpose: '', km_driven: '', notes: '' });
+    setEditingLogId(null);
+    setLogForm({
+      log_date: format(new Date(), 'yyyy-MM-dd'),
+      vehicle_id: '', client_id: '', job_site_id: '',
+      start_location: '', destination: '', purpose: '',
+      km_driven: '', notes: '',
+    });
     setKmManualOverride(false);
     setRoundTrip(true);
+  }
+
+  function editLog(log: MileageLog) {
+    setLogForm({
+      log_date: log.log_date,
+      vehicle_id: log.vehicle_id || '',
+      client_id: log.client_id || '',
+      job_site_id: log.job_site_id || '',
+      start_location: log.start_location || '',
+      destination: log.destination || '',
+      purpose: log.purpose || '',
+      km_driven: log.km_driven.toString(),
+      notes: log.notes || '',
+    });
+    setEditingLogId(log.id);
+    setKmManualOverride(true);
+    setShowLogForm(true);
+  }
+
+  async function deleteLog(log: MileageLog) {
+    await supabase.from('mileage_logs').delete().eq('id', log.id);
+    setDeleteLogConfirm(null);
     loadData();
   }
 
@@ -180,17 +226,30 @@ export function VehiclePage() {
   const kmThisMonth = logs.filter(l => l.log_date >= monthStart && l.log_date <= monthEnd).reduce((s, l) => s + l.km_driven, 0);
   const kmThisYear = logs.filter(l => l.log_date >= yearStart && l.log_date <= yearEnd).reduce((s, l) => s + l.km_driven, 0);
 
-  if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-2 border-teal-600 border-t-transparent rounded-full" /></div>;
+  const filteredLogs = logs.filter(l => {
+    if (dateFrom && l.log_date < dateFrom) return false;
+    if (dateTo && l.log_date > dateTo) return false;
+    return true;
+  });
+
+  const filteredKm = filteredLogs.reduce((s, l) => s + l.km_driven, 0);
+
+  if (loading) return (
+    <div className="flex items-center justify-center h-64">
+      <div className="animate-spin w-8 h-8 border-2 border-teal-600 border-t-transparent rounded-full" />
+    </div>
+  );
 
   return (
     <div>
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Vehicle & Mileage</h1>
-        <div className="flex gap-2">
-          <button onClick={() => setShowLogForm(true)} className="flex items-center gap-1.5 px-3 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium rounded-lg transition-colors">
-            <Plus className="w-4 h-4" /> Log Trip
-          </button>
-        </div>
+        <button
+          onClick={() => { setEditingLogId(null); setShowLogForm(true); }}
+          className="flex items-center gap-1.5 px-3 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium rounded-lg transition-colors"
+        >
+          <Plus className="w-4 h-4" /> Log Trip
+        </button>
       </div>
 
       {/* Stats */}
@@ -221,12 +280,25 @@ export function VehiclePage() {
       <div className="mb-6">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm font-semibold text-gray-900 dark:text-white">Vehicles</h2>
-          <button onClick={() => { setVehicleForm({ vehicle_name: '', year: '', make: '', model: '', opening_odometer: '', closing_odometer: '', total_km: '', business_km: '' }); setEditingVehicleId(null); setShowVehicleForm(true); }} className="text-xs text-teal-600 hover:text-teal-700 font-medium">+ Add Vehicle</button>
+          <button
+            onClick={() => {
+              setVehicleForm({ vehicle_name: '', year: '', make: '', model: '', opening_odometer: '', closing_odometer: '', total_km: '', business_km: '' });
+              setEditingVehicleId(null);
+              setShowVehicleForm(true);
+            }}
+            className="text-xs text-teal-600 hover:text-teal-700 font-medium"
+          >
+            + Add Vehicle
+          </button>
         </div>
         {vehicles.length === 0 ? (
           <p className="text-sm text-gray-400 dark:text-gray-500">No vehicles added. Add your work vehicle to track mileage.</p>
         ) : vehicles.map(v => (
-          <div key={v.id} onClick={() => editVehicle(v)} className="bg-white dark:bg-gray-800 rounded-lg border border-gray-100 dark:border-gray-700 p-3 mb-2 cursor-pointer hover:border-teal-300 dark:hover:border-teal-700 transition-colors">
+          <div
+            key={v.id}
+            onClick={() => editVehicle(v)}
+            className="bg-white dark:bg-gray-800 rounded-lg border border-gray-100 dark:border-gray-700 p-3 mb-2 cursor-pointer hover:border-teal-300 dark:hover:border-teal-700 transition-colors"
+          >
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-gray-900 dark:text-white">{v.vehicle_name}</p>
@@ -241,15 +313,47 @@ export function VehiclePage() {
         ))}
       </div>
 
+      {/* Trips header + date filter */}
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-sm font-semibold text-gray-900 dark:text-white">
+          Trips {(dateFrom || dateTo) && <span className="text-teal-600 dark:text-teal-400">— {filteredKm.toFixed(0)} km</span>}
+        </h2>
+      </div>
+
+      {/* Date range filter */}
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        <span className="text-xs text-gray-500 dark:text-gray-400 font-medium">Date:</span>
+        <input
+          type="date"
+          value={dateFrom}
+          onChange={e => setDateFrom(e.target.value)}
+          className="px-2 py-1.5 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300"
+        />
+        <span className="text-xs text-gray-400">→</span>
+        <input
+          type="date"
+          value={dateTo}
+          onChange={e => setDateTo(e.target.value)}
+          className="px-2 py-1.5 text-xs border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300"
+        />
+        {(dateFrom || dateTo) && (
+          <button
+            onClick={() => { setDateFrom(''); setDateTo(''); }}
+            className="px-2 py-1.5 text-xs text-red-500 hover:text-red-700 border border-red-200 dark:border-red-900/40 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+          >
+            Clear
+          </button>
+        )}
+      </div>
+
       {/* Mileage logs */}
-      <h2 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">Recent Trips</h2>
       <div className="space-y-2">
-        {logs.length === 0 ? (
+        {filteredLogs.length === 0 ? (
           <div className="text-center py-8 text-gray-400 dark:text-gray-500">
             <MapPin className="w-8 h-8 mx-auto mb-2 opacity-50" />
-            <p className="text-sm">No trips logged yet</p>
+            <p className="text-sm">{logs.length === 0 ? 'No trips logged yet' : 'No trips in this date range'}</p>
           </div>
-        ) : logs.map(log => (
+        ) : filteredLogs.map(log => (
           <div key={log.id} className="bg-white dark:bg-gray-800 rounded-lg border border-gray-100 dark:border-gray-700 p-3">
             <div className="flex items-center justify-between">
               <div className="flex-1 min-w-0">
@@ -257,16 +361,56 @@ export function VehiclePage() {
                   {log.start_location || '?'} → {log.destination || '?'}
                 </p>
                 <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                  {format(new Date(log.log_date + 'T00:00'), 'MMM d')}
+                  {format(new Date(log.log_date + 'T00:00'), 'MMM d, yyyy')}
                   {log.purpose && ` • ${log.purpose}`}
                   {(log as any).clients?.name && ` • ${(log as any).clients.name}`}
                 </p>
               </div>
-              <span className="text-sm font-semibold text-gray-900 dark:text-white ml-3">{log.km_driven} km</span>
+              <div className="flex items-center gap-2 ml-3">
+                <span className="text-sm font-semibold text-gray-900 dark:text-white">{log.km_driven} km</span>
+                <button
+                  onClick={() => editLog(log)}
+                  className="p-1.5 text-gray-400 hover:text-amber-500 transition-colors"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  onClick={() => setDeleteLogConfirm(log)}
+                  className="p-1.5 text-gray-400 hover:text-red-500 transition-colors"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
             </div>
           </div>
         ))}
       </div>
+
+      {/* Delete Log Confirmation */}
+      {deleteLogConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-white dark:bg-gray-800 rounded-xl w-full max-w-sm shadow-xl p-6">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Delete Trip?</h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+              {format(new Date(deleteLogConfirm.log_date + 'T00:00'), 'MMM d, yyyy')} — {deleteLogConfirm.start_location || '?'} → {deleteLogConfirm.destination || '?'} ({deleteLogConfirm.km_driven} km)
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setDeleteLogConfirm(null)}
+                className="flex-1 py-2.5 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 font-medium rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => deleteLog(deleteLogConfirm)}
+                className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg transition-colors"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Vehicle Form Modal */}
       {showVehicleForm && (
@@ -274,7 +418,9 @@ export function VehiclePage() {
           <div className="bg-white dark:bg-gray-800 rounded-xl w-full max-w-md max-h-[90vh] overflow-y-auto shadow-xl">
             <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white">{editingVehicleId ? 'Edit Vehicle' : 'Add Vehicle'}</h2>
-              <button onClick={() => setShowVehicleForm(false)} className="p-1 text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+              <button onClick={() => setShowVehicleForm(false)} className="p-1 text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
             </div>
             <form onSubmit={handleVehicleSubmit} className="p-4 space-y-4">
               <div>
@@ -318,7 +464,9 @@ export function VehiclePage() {
               {vehicleForm.total_km && vehicleForm.business_km && (
                 <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 text-sm">
                   <span className="text-gray-600 dark:text-gray-400">Business-use %: </span>
-                  <span className="font-medium text-gray-900 dark:text-white">{((parseFloat(vehicleForm.business_km) / parseFloat(vehicleForm.total_km)) * 100).toFixed(1)}%</span>
+                  <span className="font-medium text-gray-900 dark:text-white">
+                    {((parseFloat(vehicleForm.business_km) / parseFloat(vehicleForm.total_km)) * 100).toFixed(1)}%
+                  </span>
                 </div>
               )}
               <button type="submit" className="w-full py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-medium rounded-lg transition-colors">
@@ -334,8 +482,12 @@ export function VehiclePage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
           <div className="bg-white dark:bg-gray-800 rounded-xl w-full max-w-md max-h-[90vh] overflow-y-auto shadow-xl">
             <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Log Business Trip</h2>
-              <button onClick={() => setShowLogForm(false)} className="p-1 text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                {editingLogId ? 'Edit Trip' : 'Log Business Trip'}
+              </h2>
+              <button onClick={closeLogForm} className="p-1 text-gray-400 hover:text-gray-600">
+                <X className="w-5 h-5" />
+              </button>
             </div>
             <form onSubmit={handleLogSubmit} className="p-4 space-y-4">
               <div className="grid grid-cols-2 gap-3">
@@ -411,14 +563,22 @@ export function VehiclePage() {
                     </label>
                   )}
                 </div>
-                <input type="number" value={logForm.km_driven} onChange={e => { setLogForm(f => ({ ...f, km_driven: e.target.value })); setKmManualOverride(true); }} required min={0} step={0.1} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
+                <input
+                  type="number"
+                  value={logForm.km_driven}
+                  onChange={e => { setLogForm(f => ({ ...f, km_driven: e.target.value })); setKmManualOverride(true); }}
+                  required
+                  min={0}
+                  step={0.1}
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                />
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Notes</label>
                 <textarea value={logForm.notes} onChange={e => setLogForm(f => ({ ...f, notes: e.target.value }))} rows={2} className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white" />
               </div>
               <button type="submit" className="w-full py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-medium rounded-lg transition-colors">
-                Log Trip
+                {editingLogId ? 'Update Trip' : 'Log Trip'}
               </button>
             </form>
           </div>
