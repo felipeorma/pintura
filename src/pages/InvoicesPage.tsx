@@ -842,9 +842,28 @@ export function InvoicesPage() {
                 <button onClick={() => setDeleteConfirm(inv)} className="text-xs px-2 py-1 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 rounded flex items-center gap-1 hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors">
                   <Trash2 className="w-3 h-3" /> Delete
                 </button>
-                {(inv.status === 'sent' || inv.status === 'overdue') && (
-                  <button onClick={() => updateStatus(inv.id, 'paid')} className="text-xs px-2 py-1 bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-300 rounded">Mark Paid</button>
-                )}
+              </div>
+
+              {/* Status changer */}
+              <div className="mt-2 flex gap-1.5 flex-wrap">
+                {(['draft', 'sent', 'paid', 'overdue'] as const).map(s => {
+                  const isActive = inv.status === s;
+                  const colors = {
+                    draft:   isActive ? 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-200 border-gray-400 dark:border-gray-500' : 'text-gray-400 dark:text-gray-500 border-gray-200 dark:border-gray-700 hover:border-gray-400 hover:text-gray-600 dark:hover:text-gray-300',
+                    sent:    isActive ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border-blue-400 dark:border-blue-600' : 'text-gray-400 dark:text-gray-500 border-gray-200 dark:border-gray-700 hover:border-blue-300 hover:text-blue-500',
+                    paid:    isActive ? 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300 border-emerald-400 dark:border-emerald-600' : 'text-gray-400 dark:text-gray-500 border-gray-200 dark:border-gray-700 hover:border-emerald-300 hover:text-emerald-500',
+                    overdue: isActive ? 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 border-red-400 dark:border-red-600' : 'text-gray-400 dark:text-gray-500 border-gray-200 dark:border-gray-700 hover:border-red-300 hover:text-red-500',
+                  };
+                  return (
+                    <button
+                      key={s}
+                      onClick={() => !isActive && updateStatus(inv.id, s)}
+                      className={`text-xs px-2.5 py-0.5 rounded-full font-medium border transition-colors ${colors[s]}`}
+                    >
+                      {isActive ? '✓ ' : ''}{s.charAt(0).toUpperCase() + s.slice(1)}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           );
