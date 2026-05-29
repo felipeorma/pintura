@@ -305,7 +305,7 @@ export function DocumentsPage() {
               {/* Actions */}
               <div className="flex items-center gap-2 flex-shrink-0">
                 {item.url && (
-                  
+                  <a
                     href={item.url}
                     target="_blank"
                     rel="noopener noreferrer"
