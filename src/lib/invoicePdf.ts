@@ -38,21 +38,21 @@ export function generateInvoicePdf(
 
   const formatCurrency = (n: number) => `$${n.toFixed(2)}`;
 
-  const itemRows = items.map(item => `
-    <tr>
-      <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 12px; color: #6b7280; white-space: nowrap;">
+  const itemRows = items.map((item, i) => `
+    <tr style="background: ${i % 2 === 0 ? '#ffffff' : '#f9fafb'};">
+      <td style="padding: 11px 14px; border-bottom: 1px solid #f3f4f6; font-size: 12px; color: #9ca3af; white-space: nowrap;">
         ${item.work_date ? formatItemDate(item.work_date) : '-'}
       </td>
-      <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px; color: #374151;">
+      <td style="padding: 11px 14px; border-bottom: 1px solid #f3f4f6; font-size: 13px; color: #374151;">
         ${item.description || 'Service'}
       </td>
-      <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px; color: #374151; text-align: center;">
+      <td style="padding: 11px 14px; border-bottom: 1px solid #f3f4f6; font-size: 13px; color: #6b7280; text-align: center;">
         ${item.hours != null ? item.hours.toFixed(1) : '-'}
       </td>
-      <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px; color: #374151; text-align: right;">
+      <td style="padding: 11px 14px; border-bottom: 1px solid #f3f4f6; font-size: 13px; color: #6b7280; text-align: right;">
         ${item.rate != null ? formatCurrency(item.rate) : '-'}
       </td>
-      <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px; color: #374151; text-align: right; font-weight: 500;">
+      <td style="padding: 11px 14px; border-bottom: 1px solid #f3f4f6; font-size: 13px; color: #111827; text-align: right; font-weight: 600;">
         ${formatCurrency(item.subtotal || 0)}
       </td>
     </tr>
@@ -72,6 +72,7 @@ export function generateInvoicePdf(
       line-height: 1.5;
       width: 816px;
       min-height: 1056px;
+      background: #ffffff;
     }
     @page {
       size: letter portrait;
@@ -83,62 +84,70 @@ export function generateInvoicePdf(
         -webkit-print-color-adjust: exact;
         print-color-adjust: exact;
       }
-      * {
-        page-break-inside: avoid;
-      }
+      * { page-break-inside: avoid; }
     }
   </style>
 </head>
 <body>
-  <div style="width: 816px; min-height: 1056px; padding: 36px 48px;">
+
+  <!-- Top accent bar -->
+  <div style="width: 100%; height: 6px; background: linear-gradient(90deg, #0d9488 0%, #0891b2 100%);"></div>
+
+  <div style="width: 816px; min-height: 1050px; padding: 44px 56px 40px 56px;">
 
     <!-- Header -->
-    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 40px;">
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 44px;">
       <div>
-        <h1 style="font-size: 28px; font-weight: 700; color: #0d9488; letter-spacing: -0.5px;">INVOICE</h1>
-        <p style="font-size: 14px; color: #6b7280; margin-top: 4px;">${invoice.invoice_number}</p>
+        <h1 style="font-size: 36px; font-weight: 800; color: #0d9488; letter-spacing: -1px; line-height: 1;">INVOICE</h1>
+        <p style="font-size: 13px; color: #9ca3af; margin-top: 6px; letter-spacing: 0.3px;">${invoice.invoice_number}</p>
       </div>
       <div style="text-align: right;">
-        <p style="font-size: 16px; font-weight: 600; color: #1f2937;">${profile.business_name || profile.full_name}</p>
-        ${profile.full_name && profile.business_name ? `<p style="font-size: 13px; color: #6b7280;">${profile.full_name}</p>` : ''}
+        <p style="font-size: 17px; font-weight: 700; color: #111827;">${profile.business_name || profile.full_name}</p>
+        ${profile.full_name && profile.business_name ? `<p style="font-size: 13px; color: #6b7280; margin-top: 2px;">${profile.full_name}</p>` : ''}
+        ${profile.home_address ? `<p style="font-size: 13px; color: #6b7280;">${profile.home_address}</p>` : ''}
         ${profile.city ? `<p style="font-size: 13px; color: #6b7280;">${profile.city}${profile.province ? ', ' + profile.province : ''}</p>` : ''}
-        ${profile.phone ? `<p style="font-size: 13px; color: #6b7280;">${profile.phone}</p>` : ''}
+        ${profile.phone ? `<p style="font-size: 13px; color: #6b7280; margin-top: 4px;">${profile.phone}</p>` : ''}
         ${profile.email ? `<p style="font-size: 13px; color: #6b7280;">${profile.email}</p>` : ''}
+        ${profile.gst_number ? `<p style="font-size: 12px; color: #9ca3af; margin-top: 4px;">GST # ${profile.gst_number}</p>` : ''}
       </div>
     </div>
 
+    <!-- Divider -->
+    <div style="height: 1px; background: #e5e7eb; margin-bottom: 28px;"></div>
+
     <!-- Bill To + Dates -->
-    <div style="display: flex; justify-content: space-between; margin-bottom: 32px; padding: 20px; background: #f9fafb; border-radius: 8px;">
-      <div>
-        <p style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #9ca3af; margin-bottom: 6px;">Bill To</p>
-        <p style="font-size: 14px; font-weight: 600; color: #1f2937;">${client.name}</p>
-        ${client.contact_name ? `<p style="font-size: 13px; color: #6b7280;">${client.contact_name}</p>` : ''}
+    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 36px;">
+      <div style="background: #f9fafb; border-radius: 10px; padding: 20px 24px; min-width: 220px;">
+        <p style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #9ca3af; margin-bottom: 8px;">Bill To</p>
+        <p style="font-size: 15px; font-weight: 700; color: #111827;">${client.name}</p>
+        ${client.contact_name ? `<p style="font-size: 13px; color: #6b7280; margin-top: 2px;">${client.contact_name}</p>` : ''}
         ${client.email ? `<p style="font-size: 13px; color: #6b7280;">${client.email}</p>` : ''}
         ${client.phone ? `<p style="font-size: 13px; color: #6b7280;">${client.phone}</p>` : ''}
       </div>
-      <div style="text-align: right;">
-        <div style="margin-bottom: 8px;">
-          <p style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #9ca3af;">Invoice Date</p>
-          <p style="font-size: 14px; color: #1f2937;">${formatDate(invoice.invoice_date)}</p>
+
+      <div style="display: flex; gap: 32px; text-align: right;">
+        <div>
+          <p style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #9ca3af; margin-bottom: 4px;">Invoice Date</p>
+          <p style="font-size: 14px; color: #111827; font-weight: 500;">${formatDate(invoice.invoice_date)}</p>
         </div>
         ${invoice.due_date ? `
         <div>
-          <p style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #9ca3af;">Due Date</p>
-          <p style="font-size: 14px; color: #1f2937;">${formatDate(invoice.due_date)}</p>
+          <p style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #9ca3af; margin-bottom: 4px;">Due Date</p>
+          <p style="font-size: 14px; color: #111827; font-weight: 500;">${formatDate(invoice.due_date)}</p>
         </div>
         ` : ''}
       </div>
     </div>
 
     <!-- Items Table -->
-    <table style="width: 100%; border-collapse: collapse; margin-bottom: 24px;">
+    <table style="width: 100%; border-collapse: collapse; margin-bottom: 28px; border-radius: 10px; overflow: hidden;">
       <thead>
-        <tr style="border-bottom: 2px solid #0d9488;">
-          <th style="padding: 10px 12px; text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #6b7280;">Date</th>
-          <th style="padding: 10px 12px; text-align: left; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #6b7280;">Description</th>
-          <th style="padding: 10px 12px; text-align: center; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #6b7280;">Hrs</th>
-          <th style="padding: 10px 12px; text-align: right; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #6b7280;">Rate</th>
-          <th style="padding: 10px 12px; text-align: right; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #6b7280;">Amount</th>
+        <tr style="background: #111827;">
+          <th style="padding: 12px 14px; text-align: left; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #9ca3af;">Date</th>
+          <th style="padding: 12px 14px; text-align: left; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #9ca3af;">Description</th>
+          <th style="padding: 12px 14px; text-align: center; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #9ca3af;">Hrs</th>
+          <th style="padding: 12px 14px; text-align: right; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #9ca3af;">Rate</th>
+          <th style="padding: 12px 14px; text-align: right; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #9ca3af;">Amount</th>
         </tr>
       </thead>
       <tbody>
@@ -147,49 +156,54 @@ export function generateInvoicePdf(
     </table>
 
     <!-- Totals -->
-    <div style="display: flex; justify-content: flex-end; margin-bottom: 32px;">
-      <div style="width: 240px;">
-        <div style="display: flex; justify-content: space-between; padding: 8px 0; font-size: 13px;">
+    <div style="display: flex; justify-content: flex-end; margin-bottom: 36px;">
+      <div style="width: 260px;">
+        <div style="display: flex; justify-content: space-between; padding: 8px 0; font-size: 13px; border-bottom: 1px solid #f3f4f6;">
           <span style="color: #6b7280;">Subtotal</span>
-          <span style="color: #1f2937; font-weight: 500;">${formatCurrency(invoice.subtotal)}</span>
+          <span style="color: #374151; font-weight: 500;">${formatCurrency(invoice.subtotal)}</span>
         </div>
         ${invoice.gst_amount > 0 ? `
-        <div style="display: flex; justify-content: space-between; padding: 8px 0; font-size: 13px; border-bottom: 1px solid #e5e7eb;">
+        <div style="display: flex; justify-content: space-between; padding: 8px 0; font-size: 13px; border-bottom: 1px solid #f3f4f6;">
           <span style="color: #6b7280;">GST (${profile.gst_rate || 5}%)</span>
-          <span style="color: #1f2937; font-weight: 500;">${formatCurrency(invoice.gst_amount)}</span>
+          <span style="color: #374151; font-weight: 500;">${formatCurrency(invoice.gst_amount)}</span>
         </div>
         ` : ''}
-        <div style="display: flex; justify-content: space-between; padding: 12px 0; font-size: 16px; font-weight: 700;">
-          <span style="color: #1f2937;">Total</span>
-          <span style="color: #0d9488;">${formatCurrency(invoice.total_amount)}</span>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; padding: 14px 16px; background: linear-gradient(135deg, #0d9488 0%, #0891b2 100%); border-radius: 8px;">
+          <span style="font-size: 14px; font-weight: 700; color: #ffffff;">Total Due</span>
+          <span style="font-size: 20px; font-weight: 800; color: #ffffff;">${formatCurrency(invoice.total_amount)}</span>
         </div>
       </div>
     </div>
 
     <!-- Notes / Payment Instructions -->
     ${invoice.notes || profile.payment_instructions ? `
-    <div style="border-top: 1px solid #e5e7eb; padding-top: 20px;">
+    <div style="border-top: 1px solid #e5e7eb; padding-top: 24px; display: flex; gap: 40px;">
       ${invoice.notes ? `
-      <div style="margin-bottom: 12px;">
-        <p style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #9ca3af; margin-bottom: 4px;">Notes</p>
-        <p style="font-size: 13px; color: #4b5563;">${invoice.notes}</p>
+      <div style="flex: 1;">
+        <p style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #9ca3af; margin-bottom: 6px;">Notes</p>
+        <p style="font-size: 13px; color: #4b5563; line-height: 1.6;">${invoice.notes}</p>
       </div>
       ` : ''}
       ${profile.payment_instructions ? `
-      <div>
-        <p style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: #9ca3af; margin-bottom: 4px;">Payment Instructions</p>
-        <p style="font-size: 13px; color: #4b5563; white-space: pre-line;">${profile.payment_instructions}</p>
+      <div style="flex: 1;">
+        <p style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #9ca3af; margin-bottom: 6px;">Payment Instructions</p>
+        <p style="font-size: 13px; color: #4b5563; white-space: pre-line; line-height: 1.6;">${profile.payment_instructions}</p>
       </div>
       ` : ''}
     </div>
     ` : ''}
 
     <!-- Footer -->
-    <div style="margin-top: 48px; text-align: center; font-size: 12px; color: #9ca3af;">
-      <p>Thank you for your business.</p>
+    <div style="margin-top: auto; padding-top: 40px; display: flex; justify-content: space-between; align-items: center;">
+      <p style="font-size: 12px; color: #d1d5db;">Thank you for your business.</p>
+      <p style="font-size: 11px; color: #d1d5db;">${invoice.invoice_number}</p>
     </div>
 
   </div>
+
+  <!-- Bottom accent bar -->
+  <div style="width: 100%; height: 4px; background: linear-gradient(90deg, #0d9488 0%, #0891b2 100%);"></div>
+
 </body>
 </html>`;
 
