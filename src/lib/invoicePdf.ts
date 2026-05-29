@@ -65,33 +65,33 @@ export function generateInvoicePdf(
   <meta charset="utf-8">
   <title>Invoice ${invoice.invoice_number}</title>
   <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #1f2937; line-height: 1.5; }
-  @page {
-    size: letter portrait;
-    margin: 0;
-  }
-  @media print {
-    html, body {
-      width: 100%;
-      height: 100%;
-      -webkit-print-color-adjust: exact;
-      print-color-adjust: exact;
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      color: #1f2937;
+      line-height: 1.5;
+      width: 816px;
+      min-height: 1056px;
     }
-    body > div {
-      /* Escala el contenido para que quepa siempre en 1 página */
-      transform-origin: top left;
-      transform: scale(var(--print-scale, 1));
-      width: calc(100% / var(--print-scale, 1));
+    @page {
+      size: letter portrait;
+      margin: 0;
     }
-    /* Evita que se parta en múltiples páginas */
-    table { page-break-inside: avoid; }
-    tr { page-break-inside: avoid; }
-  }
-</style>
+    @media print {
+      html, body {
+        width: 816px;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+      * {
+        page-break-inside: avoid;
+      }
+    }
+  </style>
 </head>
 <body>
-  <div style="max-width: 800px; margin: 0 auto; padding: 48px;">
+  <div style="width: 816px; min-height: 1056px; padding: 36px 48px;">
+
     <!-- Header -->
     <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 40px;">
       <div>
@@ -188,6 +188,7 @@ export function generateInvoicePdf(
     <div style="margin-top: 48px; text-align: center; font-size: 12px; color: #9ca3af;">
       <p>Thank you for your business.</p>
     </div>
+
   </div>
 </body>
 </html>`;
@@ -210,22 +211,9 @@ export function generateInvoicePdf(
 
   const triggerPrint = () => {
     setTimeout(() => {
-      const iframeWin = iframe.contentWindow;
-      if (!iframeWin) return;
-
-      // Calcula cuánto ocupa el contenido vs la página (letter = 816px a 96dpi)
-      const pageHeightPx = 1056; // letter portrait a 96dpi
-      const contentHeight = iframeDoc.body.scrollHeight;
-
-      if (contentHeight > pageHeightPx) {
-        const scale = pageHeightPx / contentHeight;
-        // Inyecta el scale como CSS variable
-        iframeDoc.documentElement.style.setProperty('--print-scale', String(scale.toFixed(4)));
-      }
-
-      iframeWin.print();
+      iframe.contentWindow?.print();
       setTimeout(() => document.body.removeChild(iframe), 1000);
-    }, 350);
+    }, 300);
   };
 
   iframe.onload = triggerPrint;
