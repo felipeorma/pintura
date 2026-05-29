@@ -190,7 +190,7 @@ export function generateInvoicePdf(
 
       <!-- Footer -->
       <div style="border-top: 1px solid #f3f4f6; padding-top: 16px; display: flex; justify-content: space-between; align-items: center;">
-        <p style="font-size: 12px; color: #d1d5db;">Thank you for your business.</p>
+        <p style="font-size: 12px; color: #d1d5db;">Thank you!</p>
         <p style="font-size: 11px; color: #d1d5db;">${invoice.invoice_number}</p>
       </div>
 
