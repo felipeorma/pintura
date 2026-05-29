@@ -217,26 +217,24 @@ export function generateInvoicePdf(
   iframeDoc.close();
 
   const triggerPrint = () => {
+  const clientName = client.name.replace(/[^a-zA-Z0-9 ]/g, '').trim();
+  const date = formatDate(invoice.invoice_date);
+  const title = `Felipe Invoice - ${clientName} - ${date}`;
+  const originalTitle = document.title;
+
+  // Cambia el título ANTES del timeout, no dentro
+  document.title = title;
+
   setTimeout(() => {
     const win = iframe.contentWindow;
     if (!win) return;
-    const clientName = client.name.replace(/[^a-zA-Z0-9 ]/g, '').trim();
-    const date = formatDate(invoice.invoice_date);
-    const title = `Felipe Invoice - ${clientName} - ${date}`;
-
-    // Cambia el título de la pestaña principal temporalmente
-    const originalTitle = document.title;
-    document.title = title;
     win.document.title = title;
-
     win.print();
-
-    // Restaura el título original después de imprimir
     setTimeout(() => {
       document.title = originalTitle;
       document.body.removeChild(iframe);
-    }, 1000);
-  }, 300);
+    }, 2000);
+  }, 500);
 };
 
   iframe.onload = triggerPrint;
