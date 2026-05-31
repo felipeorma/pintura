@@ -5,7 +5,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import {
   LayoutDashboard, Clock, MapPin, Users, FileText,
   Receipt, Calculator, ShieldCheck, FolderOpen, Settings,
-  Menu, X, Moon, Sun, LogOut, PaintBucket, Car, Home, Lightbulb
+  Menu, X, Moon, Sun, LogOut, PaintBucket, Car, Home
 } from 'lucide-react';
 
 const navItems = [
@@ -17,8 +17,7 @@ const navItems = [
   { to: '/expenses', icon: Receipt, label: 'Expenses' },
   { to: '/vehicle', icon: Car, label: 'Vehicle' },
   { to: '/home-office', icon: Home, label: 'Home Office' },
-  { to: '/tax', icon: Calculator, label: 'GST / Tax' },
-  { to: '/tax-review', icon: Lightbulb, label: 'Tax Planning' },
+  { to: '/tax', icon: Calculator, label: 'Tax Center' },
   { to: '/wcb', icon: ShieldCheck, label: 'WCB' },
   { to: '/documents', icon: FolderOpen, label: 'Documents' },
   { to: '/settings', icon: Settings, label: 'Settings' },
@@ -99,38 +98,3 @@ export function Layout() {
             <NavLink
               key={item.to}
               to={item.to}
-              end={item.to === '/'}
-              className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                  isActive
-                    ? 'bg-teal-50 dark:bg-teal-900/20 text-teal-700 dark:text-teal-300'
-                    : 'text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700'
-                }`
-              }
-            >
-              <item.icon className="w-4 h-4" />
-              {item.label}
-            </NavLink>
-          ))}
-        </nav>
-        <div className="p-3 border-t border-gray-200 dark:border-gray-700 space-y-1">
-          <button onClick={toggleTheme} className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700 w-full">
-            {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-            {theme === 'dark' ? 'Light Mode' : 'Dark Mode'}
-          </button>
-          <button onClick={signOut} className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/10 w-full">
-            <LogOut className="w-4 h-4" />
-            Sign Out
-          </button>
-        </div>
-      </aside>
-
-      {/* Main content */}
-      <main className="lg:pl-56 pt-14 lg:pt-0 min-h-screen">
-        <div className="p-4 lg:p-6 max-w-6xl mx-auto">
-          <Outlet />
-        </div>
-      </main>
-    </div>
-  );
-}
