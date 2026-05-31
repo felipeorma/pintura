@@ -15,7 +15,6 @@ import { DocumentsPage } from './pages/DocumentsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { VehiclePage } from './pages/VehiclePage';
 import { HomeOfficePage } from './pages/HomeOfficePage';
-import { TaxReviewPage } from './pages/TaxReviewPage';
 
 function AppRoutes() {
   const { user, loading } = useAuth();
@@ -42,7 +41,7 @@ function AppRoutes() {
         <Route path="/vehicle" element={<VehiclePage />} />
         <Route path="/home-office" element={<HomeOfficePage />} />
         <Route path="/tax" element={<TaxPage />} />
-        <Route path="/tax-review" element={<TaxReviewPage />} />
+        <Route path="/tax-review" element={<Navigate to="/tax" replace />} />
         <Route path="/wcb" element={<WcbPage />} />
         <Route path="/documents" element={<DocumentsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
