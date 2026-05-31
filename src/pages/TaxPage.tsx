@@ -33,6 +33,8 @@ interface TaxData {
   incomeTaxAndCpp: number;
   totalToSave: number;
   safeCash: number;
+  filingDeadline: string;
+  paymentDeadline: string;
   missingReceipts: number;
   missingReceiptsAmount: number;
   needsReview: number;
@@ -65,6 +67,19 @@ interface Opportunity {
 const money = (value: number) =>
   new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' }).format(value || 0);
 
+const COMMON_DEDUCTION_CATEGORIES = [
+  'Materials and supplies',
+  'Tools and equipment',
+  'Parking',
+  'Phone',
+  'Internet',
+  'Insurance',
+  'Bank fees',
+  'Accounting / tax preparation',
+  'Safety equipment',
+  'Work clothing',
+];
+
 const CATEGORY_LINES: Record<string, { line: string; label: string }> = {
   'Materials and supplies': { line: 'T2125 line 8320 / 8811', label: 'Materials, supplies, office supplies' },
   'Tools and equipment': { line: 'T2125 CCA area / line 9270 if current expense', label: 'Tools and equipment' },
@@ -83,18 +98,3 @@ const CATEGORY_LINES: Record<string, { line: string; label: string }> = {
   'Safety equipment': { line: 'T2125 line 8811 / 9270', label: 'Safety supplies and equipment' },
   'Work clothing': { line: 'T2125 line 8811 / 9270', label: 'Protective work clothing' },
   Meals: { line: 'T2125 line 8523', label: 'Meals and entertainment' },
-  'Subcontractor payments': { line: 'T2125 line 8360', label: 'Subcontracts' },
-  Other: { line: 'T2125 line 9270', label: 'Other expenses' },
-};
-
-const FEDERAL_2025 = [
-  { from: 0, to: 57375, rate: 0.145 },
-  { from: 57375, to: 114750, rate: 0.205 },
-  { from: 114750, to: 177882, rate: 0.26 },
-  { from: 177882, to: 253414, rate: 0.29 },
-  { from: 253414, to: Infinity, rate: 0.33 },
-];
-
-const FEDERAL_2026 = [
-  { from: 0, to: 58523, rate: 0.14 },
-  { from: 58523, to: 117045, rate: 0.205 },
