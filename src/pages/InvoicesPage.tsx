@@ -24,29 +24,6 @@ interface InvoiceHistoryEntry {
   created_at: string;
 }
 
-const DEFAULT_GST_RATE = 0.05;
-
-function getGstRateDecimal(rate: unknown): number {
-  if (rate === null || rate === undefined || rate === '') {
-    return DEFAULT_GST_RATE;
-  }
-
-  const numericRate = Number(rate);
-
-  if (!Number.isFinite(numericRate) || numericRate < 0) {
-    return DEFAULT_GST_RATE;
-  }
-
-  // Supabase should store GST as 0.05.
-  // If an old value was accidentally saved as 5, convert it to 0.05.
-  return numericRate > 1 ? numericRate / 100 : numericRate;
-}
-
-function getGstRatePercentLabel(rate: unknown): string {
-  const percent = getGstRateDecimal(rate) * 100;
-  return Number.isInteger(percent) ? String(percent) : percent.toFixed(2);
-}
-
 export function InvoicesPage() {
   const { user } = useAuth();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -97,11 +74,7 @@ export function InvoicesPage() {
     ]);
     setInvoices(invRes.data || []);
     setClients(clientsRes.data || []);
-    setProfile(
-      profileRes.data
-        ? { ...profileRes.data, gst_rate: getGstRateDecimal(profileRes.data.gst_rate) }
-        : null
-    );
+    setProfile(profileRes.data);
     setHistory(historyRes.data || []);
 
     // Build flags per invoice
@@ -143,9 +116,8 @@ export function InvoicesPage() {
   async function createInvoiceFromHours() {
     if (selectedHours.size === 0) return;
     const hours = uninvoicedHours.filter(h => selectedHours.has(h.id));
-    const gstRate = profile?.gst_enabled ? getGstRateDecimal(profile.gst_rate) : 0;
     const subtotal = hours.reduce((s, h) => s + (h.subtotal || 0), 0);
-    const gstAmount = subtotal * gstRate;
+    const gstAmount = hours.reduce((s, h) => s + (h.gst_amount || 0), 0);
     const totalAmount = subtotal + gstAmount;
 
     const { data: invoice } = await supabase.from('invoices').insert({
@@ -165,9 +137,6 @@ export function InvoicesPage() {
       const items = hours.map(h => {
         const siteName = (h as any).job_sites?.site_name || 'Painting services';
         const timeRange = h.start_time && h.end_time ? ` (${h.start_time.slice(0, 5)} - ${h.end_time.slice(0, 5)})` : '';
-        const lineSubtotal = h.subtotal || 0;
-        const lineGstAmount = lineSubtotal * gstRate;
-
         return {
           user_id: user!.id,
           invoice_id: invoice.id,
@@ -177,9 +146,9 @@ export function InvoicesPage() {
           work_date: h.work_date,
           hours: h.total_hours,
           rate: h.hourly_rate,
-          subtotal: lineSubtotal,
-          gst_amount: lineGstAmount,
-          total_amount: lineSubtotal + lineGstAmount,
+          subtotal: h.subtotal,
+          gst_amount: h.gst_amount,
+          total_amount: (h.subtotal || 0) + (h.gst_amount || 0),
         };
       });
       await supabase.from('invoice_items').insert(items);
@@ -194,7 +163,7 @@ export function InvoicesPage() {
     const validItems = serviceItems.filter(i => i.description && i.rate > 0);
     if (validItems.length === 0 || !selectedClient) return;
 
-    const gstRate = profile?.gst_enabled ? getGstRateDecimal(profile.gst_rate) : 0;
+    const gstRate = profile?.gst_enabled ? (profile.gst_rate || 5) / 100 : 0;
     const subtotal = validItems.reduce((s, i) => s + (i.quantity * i.rate), 0);
     const gstAmount = subtotal * gstRate;
     const totalAmount = subtotal + gstAmount;
@@ -281,7 +250,7 @@ export function InvoicesPage() {
     const validItems = editItems.filter(i => i.description && i.rate > 0);
     if (validItems.length === 0) return;
 
-    const gstRate = profile?.gst_enabled ? getGstRateDecimal(profile.gst_rate) : 0;
+    const gstRate = profile?.gst_enabled ? (profile.gst_rate || 5) / 100 : 0;
     const subtotal = validItems.reduce((s, i) => s + (i.quantity * i.rate), 0);
     const gstAmount = subtotal * gstRate;
     const totalAmount = subtotal + gstAmount;
@@ -386,18 +355,11 @@ export function InvoicesPage() {
 
   const filtered = filterStatus === 'all' ? invoices : invoices.filter(i => i.status === filterStatus);
 
-  const selectedHoursList = uninvoicedHours.filter(h => selectedHours.has(h.id));
-  const selectedHoursSubtotal = selectedHoursList.reduce((s, h) => s + (h.subtotal || 0), 0);
-  const selectedHoursGstRate = profile?.gst_enabled ? getGstRateDecimal(profile.gst_rate) : 0;
-  const selectedHoursGst = selectedHoursSubtotal * selectedHoursGstRate;
-
   const serviceSubtotal = serviceItems.reduce((s, i) => s + (i.quantity * i.rate), 0);
-  const serviceGstRate = profile?.gst_enabled ? getGstRateDecimal(profile.gst_rate) : 0;
-  const serviceGst = serviceSubtotal * serviceGstRate;
+  const serviceGst = profile?.gst_enabled ? serviceSubtotal * ((profile.gst_rate || 5) / 100) : 0;
 
   const editSubtotal = editItems.reduce((s, i) => s + (i.quantity * i.rate), 0);
-  const editGstRate = profile?.gst_enabled ? getGstRateDecimal(profile.gst_rate) : 0;
-  const editGst = editSubtotal * editGstRate;
+  const editGst = profile?.gst_enabled ? editSubtotal * ((profile.gst_rate || 5) / 100) : 0;
 
   if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-2 border-teal-600 border-t-transparent rounded-full" /></div>;
 
@@ -474,12 +436,12 @@ export function InvoicesPage() {
                         <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
                           <div className="flex justify-between text-sm">
                             <span className="text-gray-600 dark:text-gray-400">Subtotal:</span>
-                            <span className="font-medium text-gray-900 dark:text-white">${selectedHoursSubtotal.toFixed(2)}</span>
+                            <span className="font-medium text-gray-900 dark:text-white">${uninvoicedHours.filter(h => selectedHours.has(h.id)).reduce((s, h) => s + (h.subtotal || 0), 0).toFixed(2)}</span>
                           </div>
                           {profile?.gst_enabled && (
                             <div className="flex justify-between text-sm">
-                              <span className="text-gray-600 dark:text-gray-400">GST ({getGstRatePercentLabel(profile?.gst_rate)}%):</span>
-                              <span className="font-medium text-gray-900 dark:text-white">${selectedHoursGst.toFixed(2)}</span>
+                              <span className="text-gray-600 dark:text-gray-400">GST ({profile.gst_rate || 5}%):</span>
+                              <span className="font-medium text-gray-900 dark:text-white">${uninvoicedHours.filter(h => selectedHours.has(h.id)).reduce((s, h) => s + (h.gst_amount || 0), 0).toFixed(2)}</span>
                             </div>
                           )}
                         </div>
@@ -539,7 +501,7 @@ export function InvoicesPage() {
                       </div>
                       {profile?.gst_enabled && (
                         <div className="flex justify-between text-sm">
-                          <span className="text-gray-600 dark:text-gray-400">GST ({getGstRatePercentLabel(profile?.gst_rate)}%):</span>
+                          <span className="text-gray-600 dark:text-gray-400">GST ({profile.gst_rate || 5}%):</span>
                           <span className="font-medium text-gray-900 dark:text-white">${serviceGst.toFixed(2)}</span>
                         </div>
                       )}
@@ -622,7 +584,7 @@ export function InvoicesPage() {
                   </div>
                   {profile?.gst_enabled && (
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-600 dark:text-gray-400">GST ({getGstRatePercentLabel(profile?.gst_rate)}%):</span>
+                      <span className="text-gray-600 dark:text-gray-400">GST ({profile.gst_rate || 5}%):</span>
                       <span className="font-medium text-gray-900 dark:text-white">${editGst.toFixed(2)}</span>
                     </div>
                   )}
@@ -704,7 +666,7 @@ export function InvoicesPage() {
                 </div>
                 {previewInvoice.gst_amount > 0 && (
                   <div className="flex justify-between text-sm">
-                    <span className="text-gray-600 dark:text-gray-400">GST ({getGstRatePercentLabel(profile?.gst_rate)}%)</span>
+                    <span className="text-gray-600 dark:text-gray-400">GST</span>
                     <span className="text-gray-900 dark:text-white">${previewInvoice.gst_amount.toFixed(2)}</span>
                   </div>
                 )}

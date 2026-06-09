@@ -1,721 +1,375 @@
-import { useEffect, useMemo, useState } from 'react';
-import type { ReactElement, ReactNode } from 'react';
+import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
-import {
-  AlertTriangle,
-  Calculator,
-  Car,
-  CheckCircle,
-  ClipboardCheck,
-  DollarSign,
-  FileText,
-  Home,
-  Lightbulb,
-  Receipt,
-  ShieldCheck,
-  TrendingUp,
-} from 'lucide-react';
+import { Calculator, Lightbulb, AlertTriangle, CheckCircle, TrendingUp, Car, Home, Receipt, Clock, DollarSign } from 'lucide-react';
 
 interface TaxData {
-  incomeBeforeGst: number;
   gstCollected: number;
-  gstItc: number;
-  gstPayable: number;
+  gstPaidOnExpenses: number;
+  estimatedGstPayable: number;
+  incomeBeforeGst: number;
   expenses: number;
   wcbPaid: number;
-  paymentsReceived: number;
   estimatedProfit: number;
-  federalTax: number;
-  albertaTax: number;
-  cpp: number;
-  cpp2: number;
-  incomeTaxAndCpp: number;
-  totalToSave: number;
-  safeCash: number;
-  filingDeadline: string;
-  paymentDeadline: string;
-  missingReceipts: number;
-  missingReceiptsAmount: number;
-  needsReview: number;
-  totalKm: number;
-  hasVehicle: boolean;
-  hasHomeOffice: boolean;
-  uninvoicedCount: number;
-  uninvoicedAmount: number;
-  formRows: FormRow[];
-  opportunities: Opportunity[];
+  taxReservePercent: number;
+  suggestedTaxReserve: number;
+  estimatedSafeCash: number;
+  paymentsReceived: number;
 }
 
-interface FormRow {
-  form: string;
-  line: string;
-  description: string;
-  amount: number;
-}
-
-interface Opportunity {
+interface OptimizationTip {
   id: string;
-  priority: 'high' | 'medium' | 'low';
-  icon: ReactElement;
+  icon: React.ReactNode;
   title: string;
-  detail: string;
+  description: string;
+  potentialSavings: number | null;
+  priority: 'high' | 'medium' | 'low';
   action: string;
-  estimate?: number;
-}
-
-const money = (value: number) =>
-  new Intl.NumberFormat('en-CA', { style: 'currency', currency: 'CAD' }).format(value || 0);
-
-const COMMON_DEDUCTION_CATEGORIES = [
-  'Materials and supplies',
-  'Tools and equipment',
-  'Parking',
-  'Phone',
-  'Internet',
-  'Insurance',
-  'Bank fees',
-  'Accounting / tax preparation',
-  'Safety equipment',
-  'Work clothing',
-];
-
-const CATEGORY_LINES: Record<string, { line: string; label: string }> = {
-  'Materials and supplies': { line: 'T2125 line 8320 / 8811', label: 'Materials, supplies, office supplies' },
-  'Tools and equipment': { line: 'T2125 CCA area / line 9270 if current expense', label: 'Tools and equipment' },
-  'Vehicle / auto': { line: 'T2125 line 9281 + Motor vehicle chart', label: 'Motor vehicle expenses' },
-  Fuel: { line: 'T2125 line 9281 + Motor vehicle chart', label: 'Fuel and vehicle costs' },
-  Parking: { line: 'T2125 line 9281', label: 'Parking for business trips' },
-  Phone: { line: 'T2125 line 9220', label: 'Telephone and utilities' },
-  Internet: { line: 'T2125 line 9220 / business-use-of-home', label: 'Internet business portion' },
-  'Home office': { line: 'T2125 line 9945', label: 'Business-use-of-home expenses' },
-  WCB: { line: 'T2125 line 8760 / 8690', label: 'Business fees or insurance' },
-  Insurance: { line: 'T2125 line 8690', label: 'Business insurance' },
-  'Business license / admin': { line: 'T2125 line 8760', label: 'Licences, dues, memberships' },
-  'Software / apps': { line: 'T2125 line 8810', label: 'Office/software expenses' },
-  'Bank fees': { line: 'T2125 line 8710', label: 'Interest and bank charges' },
-  'Accounting / tax preparation': { line: 'T2125 line 8860', label: 'Professional fees' },
-  'Safety equipment': { line: 'T2125 line 8811 / 9270', label: 'Safety supplies and equipment' },
-  'Work clothing': { line: 'T2125 line 8811 / 9270', label: 'Protective work clothing' },
-  Meals: { line: 'T2125 line 8523', label: 'Meals and entertainment' },
-  'Subcontractor payments': { line: 'T2125 line 8360', label: 'Subcontracts' },
-  Other: { line: 'T2125 line 9270', label: 'Other expenses' },
-};
-
-const FEDERAL_2024 = [
-  { from: 0, to: 55867, rate: 0.15 },
-  { from: 55867, to: 111733, rate: 0.205 },
-  { from: 111733, to: 173205, rate: 0.26 },
-  { from: 173205, to: 246752, rate: 0.29 },
-  { from: 246752, to: Infinity, rate: 0.33 },
-];
-
-const FEDERAL_2025 = [
-  { from: 0, to: 57375, rate: 0.145 },
-  { from: 57375, to: 114750, rate: 0.205 },
-  { from: 114750, to: 177882, rate: 0.26 },
-  { from: 177882, to: 253414, rate: 0.29 },
-  { from: 253414, to: Infinity, rate: 0.33 },
-];
-
-const FEDERAL_2026 = [
-  { from: 0, to: 58523, rate: 0.14 },
-  { from: 58523, to: 117045, rate: 0.205 },
-  { from: 117045, to: 181440, rate: 0.26 },
-  { from: 181440, to: 258482, rate: 0.29 },
-  { from: 258482, to: Infinity, rate: 0.33 },
-];
-
-const ALBERTA_2024 = [
-  { from: 0, to: 148269, rate: 0.10 },
-  { from: 148269, to: 177922, rate: 0.12 },
-  { from: 177922, to: 237230, rate: 0.13 },
-  { from: 237230, to: 355845, rate: 0.14 },
-  { from: 355845, to: Infinity, rate: 0.15 },
-];
-
-const ALBERTA_2025 = [
-  { from: 0, to: 60000, rate: 0.08 },
-  { from: 60000, to: 151234, rate: 0.10 },
-  { from: 151234, to: 181481, rate: 0.12 },
-  { from: 181481, to: 241974, rate: 0.13 },
-  { from: 241974, to: 362961, rate: 0.14 },
-  { from: 362961, to: Infinity, rate: 0.15 },
-];
-
-const ALBERTA_2026 = [
-  { from: 0, to: 61200, rate: 0.08 },
-  { from: 61200, to: 154259, rate: 0.10 },
-  { from: 154259, to: 185111, rate: 0.12 },
-  { from: 185111, to: 246813, rate: 0.13 },
-  { from: 246813, to: 370220, rate: 0.14 },
-  { from: 370220, to: Infinity, rate: 0.15 },
-];
-
-function bracketTax(income: number, brackets: typeof FEDERAL_2024) {
-  return brackets.reduce((tax, bracket) => {
-    const taxable = Math.max(0, Math.min(income, bracket.to) - bracket.from);
-    return tax + taxable * bracket.rate;
-  }, 0);
-}
-
-function estimateIncomeTax(profit: number, year: number) {
-  const taxable = Math.max(0, profit);
-  const federalBrackets = year >= 2026 ? FEDERAL_2026 : year === 2025 ? FEDERAL_2025 : FEDERAL_2024;
-  const albertaBrackets = year >= 2026 ? ALBERTA_2026 : year === 2025 ? ALBERTA_2025 : ALBERTA_2024;
-  const federalBasicAmount = year >= 2026 ? 16452 : year === 2025 ? 16129 : 15705;
-  const federalFirstRate = year >= 2026 ? 0.14 : year === 2025 ? 0.145 : 0.15;
-  const albertaBasicAmount = year >= 2026 ? 22769 : year === 2025 ? 22323 : 21885;
-  return {
-    federalTax: Math.max(0, bracketTax(taxable, federalBrackets) - federalBasicAmount * federalFirstRate),
-    albertaTax: Math.max(0, bracketTax(taxable, albertaBrackets) - albertaBasicAmount * 0.08),
-  };
-}
-
-function estimateCpp(profit: number, year: number) {
-  const ympe = year >= 2026 ? 74600 : year === 2025 ? 71300 : 68500;
-  const yampe = year >= 2026 ? 85000 : year === 2025 ? 81200 : 73200;
-  const exemption = 3500;
-  const base = Math.max(0, Math.min(profit, ympe) - exemption) * 0.119;
-  const second = Math.max(0, Math.min(profit, yampe) - ympe) * 0.08;
-  return { cpp: base, cpp2: second };
-}
-
-function getDeadlines(year: number) {
-  if (year === 2024) return { filingDeadline: 'June 16, 2025', paymentDeadline: 'April 30, 2025' };
-  return { filingDeadline: `June 15, ${year + 1}`, paymentDeadline: `April 30, ${year + 1}` };
-}
-
-function expenseLineRows(expensesByCategory: Record<string, number>) {
-  return Object.entries(expensesByCategory)
-    .filter(([, amount]) => amount > 0)
-    .sort((a, b) => b[1] - a[1])
-    .map(([category, amount]) => {
-      const info = CATEGORY_LINES[category] || CATEGORY_LINES.Other;
-      return {
-        form: 'T2125',
-        line: info.line,
-        description: `${info.label} (${category})`,
-        amount,
-      };
-    });
 }
 
 export function TaxPage() {
   const { user } = useAuth();
   const [data, setData] = useState<TaxData | null>(null);
+  const [tips, setTips] = useState<OptimizationTip[]>([]);
   const [loading, setLoading] = useState(true);
   const [year, setYear] = useState(new Date().getFullYear());
-  const [tab, setTab] = useState<'plan' | 'forms' | 'optimize'>('plan');
+  const [showTips, setShowTips] = useState(true);
 
   useEffect(() => {
     if (user) loadData();
   }, [user, year]);
 
   async function loadData() {
-    setLoading(true);
     const yearStart = `${year}-01-01`;
     const yearEnd = `${year}-12-31`;
 
-    const [invoices, expenses, wcb, payments, mileageLogs, vehicles, homeOffice, workHours] = await Promise.all([
+    const [invoices, expenses, wcb, payments, profile, mileageLogs, vehicles, homeOffice, workHours, expensesAll] = await Promise.all([
       supabase.from('invoices').select('subtotal, gst_amount').eq('user_id', user!.id).gte('invoice_date', yearStart).lte('invoice_date', yearEnd).in('status', ['sent', 'paid']),
-      supabase.from('expenses').select('category, description, deductible_amount, itc_claim_amount, total_paid, receipt_uploaded, receipt_url, tax_confidence_status, business_use_percent, subtotal_before_gst').eq('user_id', user!.id).gte('expense_date', yearStart).lte('expense_date', yearEnd),
-      supabase.from('wcb_payments').select('amount, amount_paid').eq('user_id', user!.id).gte('payment_date', yearStart).lte('payment_date', yearEnd).eq('status', 'paid'),
+      supabase.from('expenses').select('deductible_amount, itc_claim_amount').eq('user_id', user!.id).gte('expense_date', yearStart).lte('expense_date', yearEnd),
+      supabase.from('wcb_payments').select('amount').eq('user_id', user!.id).gte('payment_date', yearStart).lte('payment_date', yearEnd).eq('status', 'paid'),
       supabase.from('payments').select('amount').eq('user_id', user!.id).gte('payment_date', yearStart).lte('payment_date', yearEnd),
+      supabase.from('profiles').select('default_tax_reserve_percent').eq('id', user!.id).maybeSingle(),
       supabase.from('mileage_logs').select('km_driven').eq('user_id', user!.id).gte('log_date', yearStart).lte('log_date', yearEnd),
-      supabase.from('vehicles').select('id').eq('user_id', user!.id).eq('active', true),
-      supabase.from('home_office_settings').select('id, business_use_percent').eq('user_id', user!.id).maybeSingle(),
-      supabase.from('work_hours').select('subtotal').eq('user_id', user!.id).eq('status', 'not_invoiced'),
+      supabase.from('vehicles').select('*').eq('user_id', user!.id).eq('active', true),
+      supabase.from('home_office_settings').select('*').eq('user_id', user!.id).maybeSingle(),
+      supabase.from('work_hours').select('id, status').eq('user_id', user!.id).eq('status', 'not_invoiced'),
+      supabase.from('expenses').select('id, category, receipt_url, expense_date, total_paid').eq('user_id', user!.id).gte('expense_date', yearStart).lte('expense_date', yearEnd),
     ]);
 
-    const invoiceData = invoices.data || [];
-    const expenseData = expenses.data || [];
-    const wcbData = wcb.data || [];
-    const workHourData = workHours.data || [];
+    const gstCollected = (invoices.data || []).reduce((s, r) => s + (r.gst_amount || 0), 0);
+    const incomeBeforeGst = (invoices.data || []).reduce((s, r) => s + (r.subtotal || 0), 0);
+    const gstPaidOnExpenses = (expenses.data || []).reduce((s, r) => s + (r.itc_claim_amount || 0), 0);
+    const expensesTotal = (expenses.data || []).reduce((s, r) => s + (r.deductible_amount || 0), 0);
+    const wcbPaid = (wcb.data || []).reduce((s, r) => s + (r.amount || 0), 0);
+    const paymentsReceived = (payments.data || []).reduce((s, r) => s + (r.amount || 0), 0);
 
-    const incomeBeforeGst = invoiceData.reduce((sum, item) => sum + (item.subtotal || 0), 0);
-    const gstCollected = invoiceData.reduce((sum, item) => sum + (item.gst_amount || 0), 0);
-    const gstItc = expenseData.reduce((sum, item) => sum + (item.itc_claim_amount || 0), 0);
-    const expensesTotal = expenseData.reduce((sum, item) => sum + (item.deductible_amount || 0), 0);
-    const wcbPaid = wcbData.reduce((sum, item: any) => sum + (item.amount_paid || item.amount || 0), 0);
-    const paymentsReceived = (payments.data || []).reduce((sum, item) => sum + (item.amount || 0), 0);
+    const estimatedGstPayable = Math.max(0, gstCollected - gstPaidOnExpenses);
     const estimatedProfit = incomeBeforeGst - expensesTotal - wcbPaid;
-    const gstPayable = Math.max(0, gstCollected - gstItc);
-    const { federalTax, albertaTax } = estimateIncomeTax(estimatedProfit, year);
-    const { cpp, cpp2 } = estimateCpp(estimatedProfit, year);
-    const incomeTaxAndCpp = federalTax + albertaTax + cpp + cpp2;
-    const totalToSave = gstPayable + incomeTaxAndCpp;
-    const { filingDeadline, paymentDeadline } = getDeadlines(year);
-    const missingReceiptRows = expenseData.filter((item: any) => !item.receipt_uploaded && !item.receipt_url);
-    const needsReviewRows = expenseData.filter((item: any) => item.tax_confidence_status === 'needs_review' || item.tax_confidence_status === 'ask_accountant');
-    const expensesByCategory = expenseData.reduce<Record<string, number>>((acc, item: any) => {
-      const category = item.category || 'Other';
-      acc[category] = (acc[category] || 0) + (item.deductible_amount || 0);
-      return acc;
-    }, {});
-    const totalKm = (mileageLogs.data || []).reduce((sum, item) => sum + (item.km_driven || 0), 0);
-    const hasVehicle = (vehicles.data || []).length > 0;
-    const hasHomeOffice = Boolean(homeOffice.data);
-    const uninvoicedAmount = workHourData.reduce((sum: number, item: any) => sum + (item.subtotal || 0), 0);
-    const formRows: FormRow[] = [
-      { form: 'GST/HST Return', line: 'Line 101', description: 'Sales and other revenue before GST', amount: incomeBeforeGst },
-      { form: 'GST/HST Return', line: 'Line 103', description: 'GST collected or collectible', amount: gstCollected },
-      { form: 'GST/HST Return', line: 'Line 106', description: 'Input tax credits from expenses', amount: gstItc },
-      { form: 'GST/HST Return', line: 'Line 109', description: 'Net GST to remit', amount: gstPayable },
-      { form: 'T2125', line: 'Part 3D', description: 'Gross business income before GST', amount: incomeBeforeGst },
-      { form: 'T2125', line: 'Part 4', description: 'Total deductible expenses before WCB split', amount: expensesTotal },
-      { form: 'T2125', line: 'Part 4', description: 'WCB paid as business expense', amount: wcbPaid },
-      { form: 'T2125', line: 'Net income', description: 'Estimated net self-employment income', amount: estimatedProfit },
-      { form: 'T1', line: 'Income tax', description: 'Estimated federal income tax', amount: federalTax },
-      { form: 'AB428', line: 'Alberta tax', description: 'Estimated Alberta income tax', amount: albertaTax },
-      { form: 'Schedule 8', line: 'CPP', description: 'Estimated self-employed CPP and CPP2', amount: cpp + cpp2 },
-      ...expenseLineRows(expensesByCategory),
-    ];
-
-    const opportunities: Opportunity[] = [];
-    const categories = new Set(expenseData.map((item: any) => item.category).filter(Boolean));
-    const missingCommonCategories = COMMON_DEDUCTION_CATEGORIES.filter(category => !categories.has(category));
-    const largeTools = expenseData.filter((item: any) =>
-      item.category === 'Tools and equipment' && (item.subtotal_before_gst || 0) >= 500
-    );
-    const mealsTotal = expensesByCategory.Meals || 0;
-
-    if (missingReceiptRows.length > 0) {
-      opportunities.push({
-        id: 'receipts',
-        priority: 'high',
-        icon: <Receipt className="w-5 h-5" />,
-        title: `${missingReceiptRows.length} expenses need receipts`,
-        detail: `${money(missingReceiptRows.reduce((sum: number, item: any) => sum + (item.total_paid || 0), 0))} could be hard to defend if CRA asks for proof.`,
-        action: 'Upload receipts before filing.',
-      });
-    }
-
-    if (!hasVehicle) {
-      opportunities.push({
-        id: 'vehicle',
-        priority: 'high',
-        icon: <Car className="w-5 h-5" />,
-        title: 'Vehicle not set up',
-        detail: 'If you drive to job sites, suppliers, estimates, or client meetings, track the business portion and keep a logbook.',
-        action: 'Add vehicle and start logging business kilometres.',
-        estimate: 2500,
-      });
-    } else if (totalKm === 0) {
-      opportunities.push({
-        id: 'mileage',
-        priority: 'high',
-        icon: <Car className="w-5 h-5" />,
-        title: 'No mileage logged',
-        detail: 'Vehicle expenses need business-use support. A logbook protects the deduction.',
-        action: 'Record trips for job sites, suppliers, estimates, and client visits.',
-      });
-    } else if (!categories.has('Parking')) {
-      opportunities.push({
-        id: 'parking',
-        priority: 'low',
-        icon: <Car className="w-5 h-5" />,
-        title: 'Review business parking',
-        detail: 'CRA allows the full amount of parking fees related to business activities, even when other vehicle costs are prorated.',
-        action: 'Add parking receipts for suppliers, estimates, client visits, and job sites.',
-      });
-    }
-
-    if (!hasHomeOffice) {
-      opportunities.push({
-        id: 'home-office',
-        priority: 'medium',
-        icon: <Home className="w-5 h-5" />,
-        title: 'Home office not configured',
-        detail: 'Admin work from home can support a portion of rent, utilities, insurance, internet, and maintenance.',
-        action: 'Set up square footage and business-use percentage.',
-        estimate: 1200,
-      });
-    }
-
-    if (gstCollected > 0 && gstItc === 0 && expenseData.length > 0) {
-      opportunities.push({
-        id: 'itc',
-        priority: 'high',
-        icon: <DollarSign className="w-5 h-5" />,
-        title: 'No GST input tax credits claimed',
-        detail: 'You are collecting GST but not claiming GST paid on business expenses.',
-        action: 'Edit expenses and enter GST paid where the receipt shows GST.',
-        estimate: Math.min(gstCollected * 0.25, expensesTotal * 0.05),
-      });
-    } else if (gstCollected > 0 && gstItc > 0) {
-      opportunities.push({
-        id: 'itc-history',
-        priority: 'low',
-        icon: <DollarSign className="w-5 h-5" />,
-        title: 'Review unclaimed GST input tax credits',
-        detail: 'Eligible GST/HST paid on prior business expenses may still be claimable within the CRA time limit when supported by proper documents.',
-        action: 'Review older receipts for missed GST and confirm the eligible claim period before filing.',
-      });
-    }
-
-    if (incomeBeforeGst > 30000 && gstCollected === 0) {
-      opportunities.push({
-        id: 'gst-registration',
-        priority: 'high',
-        icon: <AlertTriangle className="w-5 h-5" />,
-        title: 'Review GST registration immediately',
-        detail: 'Your tracked taxable revenue exceeds $30,000 and no GST is recorded. CRA registration and charging rules may apply based on the quarter when you crossed the threshold.',
-        action: 'Confirm your GST/HST registration status and effective date before sending more invoices.',
-      });
-    }
-
-    if (gstCollected > 0 && incomeBeforeGst > 0 && incomeBeforeGst <= 400000) {
-      opportunities.push({
-        id: 'gst-quick-method',
-        priority: 'low',
-        icon: <Calculator className="w-5 h-5" />,
-        title: 'Compare the GST/HST Quick Method',
-        detail: 'Some eligible small businesses with taxable sales within the CRA limit can elect a simplified GST/HST calculation. It is not automatically better because most ITCs are handled differently.',
-        action: 'Ask your accountant to compare the regular method against the Quick Method before making a GST74 election.',
-      });
-    }
-
-    if (incomeTaxAndCpp > 3000) {
-      opportunities.push({
-        id: 'instalments',
-        priority: 'high',
-        icon: <DollarSign className="w-5 h-5" />,
-        title: 'Plan for CRA income-tax instalments',
-        detail: `${money(incomeTaxAndCpp)} estimated tax and CPP is above the $3,000 threshold used in the CRA instalment rules outside Quebec. Prior-year balances also matter.`,
-        action: 'Check CRA My Account for INNS1 reminders and plan for March 15, June 15, September 15, and December 15 payments.',
-      });
-    }
-
-    if (mealsTotal > 0) {
-      opportunities.push({
-        id: 'meals',
-        priority: 'medium',
-        icon: <Receipt className="w-5 h-5" />,
-        title: 'Confirm the allowable meals amount',
-        detail: `${money(mealsTotal)} is recorded under meals. CRA generally limits meals and entertainment deductions to 50% of the lesser of the actual or reasonable amount.`,
-        action: 'Confirm the deductible amount and keep receipts plus the business purpose for each meal.',
-      });
-    }
-
-    if (largeTools.length > 0) {
-      opportunities.push({
-        id: 'cca',
-        priority: 'medium',
-        icon: <Calculator className="w-5 h-5" />,
-        title: `${largeTools.length} tool purchases may need CCA review`,
-        detail: `${money(largeTools.reduce((sum: number, item: any) => sum + (item.subtotal_before_gst || 0), 0))} in larger tool purchases may be capital assets instead of current expenses.`,
-        action: 'Ask your accountant whether to claim capital cost allowance (CCA).',
-      });
-    }
-
-    if (missingCommonCategories.length >= 3 && incomeBeforeGst > 0) {
-      opportunities.push({
-        id: 'missing-categories',
-        priority: 'medium',
-        icon: <Receipt className="w-5 h-5" />,
-        title: 'Review commonly missed deductions',
-        detail: `No expenses are recorded yet for: ${missingCommonCategories.slice(0, 5).join(', ')}${missingCommonCategories.length > 5 ? ', and more' : ''}.`,
-        action: 'Check bank and credit-card statements. Add only real business expenses with supporting documents.',
-      });
-    }
-
-    if (estimatedProfit > 0) {
-      opportunities.push({
-        id: 'registered-savings',
-        priority: 'low',
-        icon: <DollarSign className="w-5 h-5" />,
-        title: 'Review RRSP and FHSA contribution room',
-        detail: 'Eligible RRSP contributions can reduce taxable income. If you qualify as a first-time home buyer, FHSA contributions are generally deductible too.',
-        action: 'Check your CRA account or Notice of Assessment before contributing. Do not exceed your available room.',
-      });
-    }
-
-    if (estimatedProfit > 0 && estimatedProfit < 50000) {
-      opportunities.push({
-        id: 'benefits',
-        priority: 'low',
-        icon: <ShieldCheck className="w-5 h-5" />,
-        title: 'Check refundable benefits and personal credits',
-        detail: 'Depending on family net income and your situation, filing may unlock benefits such as the Canada Workers Benefit and GST/HST credit.',
-        action: 'Confirm spouse, dependant, medical, childcare, disability, and donation details in your tax software.',
-      });
-    }
-
-    if (needsReviewRows.length > 0) {
-      opportunities.push({
-        id: 'review',
-        priority: 'medium',
-        icon: <ShieldCheck className="w-5 h-5" />,
-        title: `${needsReviewRows.length} expenses marked for review`,
-        detail: 'Clean these before filing so your accountant is not guessing.',
-        action: 'Review category, business-use percentage, receipt, and notes.',
-      });
-    }
-
-    if (workHourData.length > 0) {
-      opportunities.push({
-        id: 'uninvoiced',
-        priority: 'medium',
-        icon: <FileText className="w-5 h-5" />,
-        title: `${workHourData.length} uninvoiced work entries`,
-        detail: `${money(uninvoicedAmount)} is not billed yet, which affects cash flow and year-end planning.`,
-        action: 'Create invoices or mark entries correctly.',
-      });
-    }
-
-    if (incomeBeforeGst > 0 && expensesTotal / incomeBeforeGst < 0.15) {
-      opportunities.push({
-        id: 'low-expenses',
-        priority: 'medium',
-        icon: <TrendingUp className="w-5 h-5" />,
-        title: 'Expense ratio looks low',
-        detail: `Tracked expenses are only ${((expensesTotal / incomeBeforeGst) * 100).toFixed(1)}% of income. Contractors often miss small supplies, parking, phone, internet, tools, bank fees, and accounting costs.`,
-        action: 'Review bank/credit card statements for legitimate business purchases.',
-      });
-    }
-
-    if (expenseData.length > 0) {
-      opportunities.push({
-        id: 'records',
-        priority: 'low',
-        icon: <ClipboardCheck className="w-5 h-5" />,
-        title: 'Keep a six-year CRA audit file',
-        detail: 'CRA generally requires business and tax records to be kept for at least six years. Receipts alone may not be enough for every claim.',
-        action: 'Keep readable receipts, invoices, bank statements, contracts, mileage logs, and CRA notices together by tax year.',
-      });
-    }
+    const taxReservePercent = profile.data?.default_tax_reserve_percent || 25;
+    const suggestedTaxReserve = Math.max(0, estimatedProfit * (taxReservePercent / 100));
+    const estimatedSafeCash = paymentsReceived - estimatedGstPayable - suggestedTaxReserve;
 
     setData({
-      incomeBeforeGst,
       gstCollected,
-      gstItc,
-      gstPayable,
+      gstPaidOnExpenses,
+      estimatedGstPayable,
+      incomeBeforeGst,
       expenses: expensesTotal,
       wcbPaid,
-      paymentsReceived,
       estimatedProfit,
-      federalTax,
-      albertaTax,
-      cpp,
-      cpp2,
-      incomeTaxAndCpp,
-      totalToSave,
-      safeCash: Math.max(0, paymentsReceived - totalToSave),
-      filingDeadline,
-      paymentDeadline,
-      missingReceipts: missingReceiptRows.length,
-      missingReceiptsAmount: missingReceiptRows.reduce((sum: number, item: any) => sum + (item.total_paid || 0), 0),
-      needsReview: needsReviewRows.length,
-      totalKm,
-      hasVehicle,
-      hasHomeOffice,
-      uninvoicedCount: workHourData.length,
-      uninvoicedAmount,
-      formRows,
-      opportunities: opportunities.sort((a, b) => ({ high: 0, medium: 1, low: 2 }[a.priority] - { high: 0, medium: 1, low: 2 }[b.priority])),
+      taxReservePercent,
+      suggestedTaxReserve,
+      estimatedSafeCash: Math.max(0, estimatedSafeCash),
+      paymentsReceived,
     });
+
+    // Generate optimization tips
+    const generatedTips: OptimizationTip[] = [];
+
+    // 1. Missing receipts
+    const missingReceipts = (expensesAll.data || []).filter(e => !e.receipt_url);
+    if (missingReceipts.length > 0) {
+      const missingTotal = missingReceipts.reduce((s, e) => s + (e.total_paid || 0), 0);
+      generatedTips.push({
+        id: 'missing-receipts',
+        icon: <Receipt className="w-5 h-5" />,
+        title: `${missingReceipts.length} expenses without receipts`,
+        description: `$${missingTotal.toFixed(0)} in expenses could be denied by CRA without proof. Upload photos of your receipts to protect these deductions.`,
+        potentialSavings: null,
+        priority: 'high',
+        action: 'Go to Expenses and upload missing receipts',
+      });
+    }
+
+    // 2. Vehicle / mileage
+    const totalKm = (mileageLogs.data || []).reduce((s, r) => s + (r.km_driven || 0), 0);
+    const hasVehicle = (vehicles.data || []).length > 0;
+    if (!hasVehicle) {
+      generatedTips.push({
+        id: 'no-vehicle',
+        icon: <Car className="w-5 h-5" />,
+        title: 'No vehicle registered',
+        description: 'If you drive to job sites, you can deduct vehicle expenses. At $0.70/km (CRA 2024 rate for first 5,000 km), even 100 km/week = $3,640/year in deductions.',
+        potentialSavings: 3640,
+        priority: 'high',
+        action: 'Add your vehicle in the Vehicle section',
+      });
+    } else if (totalKm === 0) {
+      generatedTips.push({
+        id: 'no-mileage',
+        icon: <Car className="w-5 h-5" />,
+        title: 'No mileage logged this year',
+        description: 'You have a vehicle registered but no trips logged. Every business trip is deductible. Start logging to build your claim.',
+        potentialSavings: 2500,
+        priority: 'high',
+        action: 'Log your trips in the Vehicle section',
+      });
+    } else if (totalKm < 5000) {
+      const potential = (5000 - totalKm) * 0.70;
+      generatedTips.push({
+        id: 'low-mileage',
+        icon: <Car className="w-5 h-5" />,
+        title: `Only ${totalKm.toFixed(0)} km logged so far`,
+        description: `CRA allows the first 5,000 km at $0.70/km. Make sure you're logging ALL business trips -- to job sites, supply stores, client meetings, etc.`,
+        potentialSavings: potential > 500 ? potential : null,
+        priority: 'medium',
+        action: 'Review if you have unlogged trips',
+      });
+    }
+
+    // 3. Home office
+    if (!homeOffice.data) {
+      generatedTips.push({
+        id: 'no-home-office',
+        icon: <Home className="w-5 h-5" />,
+        title: 'Home office not set up',
+        description: 'If you do admin work from home (invoicing, planning, bookkeeping), you can deduct a portion of rent/mortgage interest, utilities, insurance, and internet.',
+        potentialSavings: 1500,
+        priority: 'medium',
+        action: 'Set up your home office in the Home Office section',
+      });
+    } else if ((homeOffice.data.business_use_percent || 0) < 10) {
+      generatedTips.push({
+        id: 'low-home-office',
+        icon: <Home className="w-5 h-5" />,
+        title: 'Home office at very low percentage',
+        description: 'Your business use is under 10%. If you have a dedicated workspace, recalculate based on square footage. A 150sqft office in a 1200sqft home = 12.5%.',
+        potentialSavings: null,
+        priority: 'low',
+        action: 'Review your home office calculation',
+      });
+    }
+
+    // 4. Uninvoiced hours
+    const uninvoicedCount = (workHours.data || []).length;
+    if (uninvoicedCount > 10) {
+      generatedTips.push({
+        id: 'uninvoiced-hours',
+        icon: <Clock className="w-5 h-5" />,
+        title: `${uninvoicedCount} hours not yet invoiced`,
+        description: 'Uninvoiced work means uncollected income. Invoice regularly to maintain cash flow and keep your records current for year-end.',
+        potentialSavings: null,
+        priority: 'medium',
+        action: 'Create invoices for outstanding work',
+      });
+    }
+
+    // 5. Expense categories check
+    const allExpenses = expensesAll.data || [];
+    const categories = new Set(allExpenses.map(e => e.category));
+    const commonDeductions = ['Phone', 'Internet', 'Safety equipment', 'Work clothing', 'Tools and equipment', 'Insurance'];
+    const missingCategories = commonDeductions.filter(c => !categories.has(c));
+    if (missingCategories.length >= 3 && incomeBeforeGst > 0) {
+      generatedTips.push({
+        id: 'missing-categories',
+        icon: <DollarSign className="w-5 h-5" />,
+        title: 'Common deductions you may be missing',
+        description: `You haven't claimed: ${missingCategories.slice(0, 3).join(', ')}${missingCategories.length > 3 ? ` and ${missingCategories.length - 3} more` : ''}. These are all legitimate business expenses for a painter.`,
+        potentialSavings: null,
+        priority: 'medium',
+        action: 'Review common expenses and add any you paid',
+      });
+    }
+
+    // 6. Low expense ratio warning
+    if (incomeBeforeGst > 0 && expensesTotal > 0) {
+      const ratio = expensesTotal / incomeBeforeGst;
+      if (ratio < 0.15) {
+        generatedTips.push({
+          id: 'low-expenses',
+          icon: <TrendingUp className="w-5 h-5" />,
+          title: 'Your expense ratio is very low',
+          description: `Expenses are only ${(ratio * 100).toFixed(0)}% of income. Most painters/contractors have 25-40%. You may be paying for business items out of pocket without tracking them.`,
+          potentialSavings: incomeBeforeGst * 0.1,
+          priority: 'medium',
+          action: 'Track all receipts -- even small purchases add up',
+        });
+      }
+    }
+
+    // 7. GST ITC optimization
+    if (gstCollected > 0 && gstPaidOnExpenses === 0 && allExpenses.length > 0) {
+      generatedTips.push({
+        id: 'no-itc',
+        icon: <DollarSign className="w-5 h-5" />,
+        title: 'No GST Input Tax Credits claimed',
+        description: 'You collected GST but have $0 in ITCs. Make sure to enter the GST portion when logging expenses -- you get that money back when filing.',
+        potentialSavings: gstCollected * 0.2,
+        priority: 'high',
+        action: 'Update expenses with GST amounts paid',
+      });
+    }
+
+    // 8. Year-end planning
+    const currentMonth = new Date().getMonth();
+    if (currentMonth >= 9 && estimatedProfit > 30000) {
+      generatedTips.push({
+        id: 'year-end',
+        icon: <Calculator className="w-5 h-5" />,
+        title: 'Consider year-end purchases',
+        description: `With $${estimatedProfit.toFixed(0)} estimated profit, buying tools, safety gear, or supplies before Dec 31 reduces your taxable income for this year.`,
+        potentialSavings: estimatedProfit * 0.05,
+        priority: 'medium',
+        action: 'Plan purchases before December 31',
+      });
+    }
+
+    setTips(generatedTips.sort((a, b) => {
+      const priorityOrder = { high: 0, medium: 1, low: 2 };
+      return priorityOrder[a.priority] - priorityOrder[b.priority];
+    }));
+
     setLoading(false);
   }
-
-  const reservePercent = useMemo(() => {
-    if (!data || data.paymentsReceived <= 0) return 0;
-    return Math.min(100, (data.totalToSave / data.paymentsReceived) * 100);
-  }, [data]);
 
   if (loading) return <div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-2 border-teal-600 border-t-transparent rounded-full" /></div>;
   if (!data) return null;
 
-  const summaryCards = [
-    { label: 'Keep saved for filing', value: data.totalToSave, detail: `${money(data.gstPayable)} GST + ${money(data.incomeTaxAndCpp)} tax/CPP`, tone: 'red' },
-    { label: 'Estimated net profit', value: data.estimatedProfit, detail: 'Income minus expenses and WCB', tone: 'gray' },
-    { label: 'Safe cash after reserve', value: data.safeCash, detail: `${reservePercent.toFixed(1)}% of received payments reserved`, tone: 'emerald' },
+  const rows = [
+    { label: 'Income (before GST)', value: data.incomeBeforeGst, info: 'Total from invoices sent/paid' },
+    { label: 'GST Collected', value: data.gstCollected, info: 'GST is not income - keep it separate' },
+    { label: 'GST Paid on Expenses (ITC)', value: data.gstPaidOnExpenses, info: 'You can claim this back' },
+    { label: 'Estimated GST Payable', value: data.estimatedGstPayable, info: 'GST Collected minus ITC' },
+    { label: 'Business Expenses', value: data.expenses, info: 'Deductible expenses' },
+    { label: 'WCB Paid', value: data.wcbPaid, info: 'WCB payments are business expenses' },
+    { label: 'Estimated Profit', value: data.estimatedProfit, info: 'Income - expenses - WCB' },
+    { label: `Tax Reserve (${data.taxReservePercent}%)`, value: data.suggestedTaxReserve, info: 'Set aside for income tax' },
+    { label: 'Payments Received', value: data.paymentsReceived, info: 'Cash actually received' },
+    { label: 'Estimated Safe Cash', value: data.estimatedSafeCash, info: 'After GST and tax reserve' },
   ];
 
+  const priorityColors = {
+    high: { bg: 'bg-red-50 dark:bg-red-900/10', border: 'border-red-200 dark:border-red-800', icon: 'text-red-600 dark:text-red-400', badge: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300' },
+    medium: { bg: 'bg-amber-50 dark:bg-amber-900/10', border: 'border-amber-200 dark:border-amber-800', icon: 'text-amber-600 dark:text-amber-400', badge: 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300' },
+    low: { bg: 'bg-blue-50 dark:bg-blue-900/10', border: 'border-blue-200 dark:border-blue-800', icon: 'text-blue-600 dark:text-blue-400', badge: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300' },
+  };
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Tax Command Center</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">GST, income tax reserve, CRA forms, and legal deduction planning.</p>
-        </div>
-        <select value={year} onChange={event => setYear(Number(event.target.value))} className="w-full sm:w-auto px-3 py-2 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-sm">
-          {[2024, 2025, 2026].map(option => <option key={option} value={option}>{option}</option>)}
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">GST / Tax Estimate</h1>
+        <select value={year} onChange={e => setYear(Number(e.target.value))} className="px-3 py-1.5 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-sm">
+          {[2024, 2025, 2026].map(y => <option key={y} value={y}>{y}</option>)}
         </select>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-        {summaryCards.map(card => (
-          <div key={card.label} className="bg-white dark:bg-gray-800 rounded-lg border border-gray-100 dark:border-gray-700 p-4">
-            <p className="text-xs font-medium text-gray-500 dark:text-gray-400">{card.label}</p>
-            <p className={`text-2xl font-bold mt-1 ${card.tone === 'red' ? 'text-red-600 dark:text-red-400' : card.tone === 'emerald' ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-900 dark:text-white'}`}>{money(card.value)}</p>
-            <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">{card.detail}</p>
+      {/* Tax Optimization Tips */}
+      {tips.length > 0 && (
+        <div className="mb-6">
+          <button
+            onClick={() => setShowTips(!showTips)}
+            className="flex items-center gap-2 mb-3 group"
+          >
+            <div className="flex items-center justify-center w-8 h-8 rounded-lg bg-teal-100 dark:bg-teal-900/30">
+              <Lightbulb className="w-4 h-4 text-teal-700 dark:text-teal-300" />
+            </div>
+            <div className="flex-1 text-left">
+              <h2 className="text-sm font-semibold text-gray-900 dark:text-white group-hover:text-teal-700 dark:group-hover:text-teal-300 transition-colors">
+                Tax Optimization Tips
+              </h2>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                {tips.length} action{tips.length !== 1 ? 's' : ''} to maximize your deductions
+              </p>
+            </div>
+            <span className="text-xs text-gray-400">{showTips ? 'Hide' : 'Show'}</span>
+          </button>
+
+          {showTips && (
+            <div className="space-y-3">
+              {tips.map(tip => {
+                const colors = priorityColors[tip.priority];
+                return (
+                  <div key={tip.id} className={`${colors.bg} border ${colors.border} rounded-xl p-4 transition-all`}>
+                    <div className="flex gap-3">
+                      <div className={`flex-shrink-0 mt-0.5 ${colors.icon}`}>
+                        {tip.icon}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-start justify-between gap-2">
+                          <h3 className="text-sm font-semibold text-gray-900 dark:text-white">{tip.title}</h3>
+                          <span className={`flex-shrink-0 text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${colors.badge}`}>
+                            {tip.priority}
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-600 dark:text-gray-400 mt-1 leading-relaxed">{tip.description}</p>
+                        <div className="flex items-center justify-between mt-2">
+                          <span className="text-xs font-medium text-gray-500 dark:text-gray-400 italic">{tip.action}</span>
+                          {tip.potentialSavings && (
+                            <span className="text-xs font-bold text-emerald-700 dark:text-emerald-400">
+                              ~ ${tip.potentialSavings.toFixed(0)} potential
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+
+              {tips.filter(t => t.potentialSavings).length > 0 && (
+                <div className="bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-800 rounded-xl p-3 text-center">
+                  <p className="text-xs text-emerald-700 dark:text-emerald-300">
+                    Estimated potential savings if all actions are taken:
+                  </p>
+                  <p className="text-lg font-bold text-emerald-800 dark:text-emerald-200 mt-0.5">
+                    ${tips.reduce((s, t) => s + (t.potentialSavings || 0), 0).toFixed(0)}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {tips.length === 0 && (
+            <div className="bg-emerald-50 dark:bg-emerald-900/10 border border-emerald-200 dark:border-emerald-800 rounded-xl p-4 flex items-center gap-3">
+              <CheckCircle className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+              <p className="text-sm text-emerald-800 dark:text-emerald-200">Looking good! No immediate actions needed.</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tax Summary Table */}
+      <div className="bg-white dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700 divide-y divide-gray-100 dark:divide-gray-700">
+        {rows.map(row => (
+          <div key={row.label} className="flex items-center justify-between px-4 py-3">
+            <div>
+              <p className="text-sm font-medium text-gray-900 dark:text-white">{row.label}</p>
+              <p className="text-xs text-gray-400 dark:text-gray-500">{row.info}</p>
+            </div>
+            <span className="text-sm font-semibold text-gray-900 dark:text-white">${row.value.toFixed(2)}</span>
           </div>
         ))}
       </div>
 
-      <section className="bg-white dark:bg-gray-800 rounded-lg border border-gray-100 dark:border-gray-700 p-4">
-        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+      <div className="mt-6 bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
+        <div className="flex gap-2">
+          <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
           <div>
-            <p className="text-xs font-semibold uppercase text-teal-700 dark:text-teal-300">Current Tax Return Estimate</p>
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white mt-1">Estimated balance owing: {money(data.incomeTaxAndCpp)}</h2>
-            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">Personal income tax and self-employed CPP based on the business records currently entered. GST is shown separately.</p>
-          </div>
-          <div className="sm:text-right">
-            <p className="text-xs text-gray-500 dark:text-gray-400">Self-employed filing deadline</p>
-            <p className="text-sm font-semibold text-gray-900 dark:text-white">{data.filingDeadline}</p>
-            <p className="text-xs text-red-600 dark:text-red-400 mt-1">Pay balance by {data.paymentDeadline}</p>
+            <p className="text-sm font-medium text-amber-800 dark:text-amber-300">Disclaimer</p>
+            <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">This is an estimate only and not official tax advice. Consult a tax professional for accurate filing.</p>
           </div>
         </div>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-4 pt-4 border-t border-gray-100 dark:border-gray-700">
-          <Metric label="Net business income" value={data.estimatedProfit} />
-          <Metric label="Income tax estimate" value={data.federalTax + data.albertaTax} />
-          <Metric label="CPP + CPP2 estimate" value={data.cpp + data.cpp2} />
-          <Metric label="GST tracked separately" value={data.gstPayable} danger />
-        </div>
-        <p className="text-xs text-gray-400 dark:text-gray-500 mt-3">A refund cannot be calculated accurately until personal credits, deductions, other income, and CRA instalments are entered in your filing software.</p>
-      </section>
-
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <Metric label="Income before GST" value={data.incomeBeforeGst} />
-        <Metric label="GST to remit" value={data.gstPayable} danger />
-        <Metric label="Expenses + WCB" value={data.expenses + data.wcbPaid} />
-        <Metric label="CPP estimate" value={data.cpp + data.cpp2} />
       </div>
-
-      <div className="flex flex-wrap gap-2">
-        <TabButton active={tab === 'plan'} onClick={() => setTab('plan')} icon={<Calculator className="w-4 h-4" />} label="Plan" />
-        <TabButton active={tab === 'forms'} onClick={() => setTab('forms')} icon={<ClipboardCheck className="w-4 h-4" />} label="Forms" />
-        <TabButton active={tab === 'optimize'} onClick={() => setTab('optimize')} icon={<Lightbulb className="w-4 h-4" />} label={`Tax Optimization Tips (${data.opportunities.length})`} />
-      </div>
-
-      {tab === 'plan' && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <Panel title="What to Keep Saved">
-            <Row label="GST collected" value={data.gstCollected} />
-            <Row label="Minus GST paid on expenses (ITCs)" value={-data.gstItc} />
-            <Row label="GST payable" value={data.gstPayable} strong danger />
-            <Row label="Federal income tax estimate" value={data.federalTax} />
-            <Row label="Alberta income tax estimate" value={data.albertaTax} />
-            <Row label="Self-employed CPP + CPP2" value={data.cpp + data.cpp2} />
-            <Row label="Total to reserve" value={data.totalToSave} strong danger />
-          </Panel>
-
-          <Panel title="Filing Readiness">
-            <Check ok={data.missingReceipts === 0} label={data.missingReceipts === 0 ? 'All receipts uploaded' : `${data.missingReceipts} receipts missing (${money(data.missingReceiptsAmount)})`} />
-            <Check ok={data.needsReview === 0} label={data.needsReview === 0 ? 'No expenses marked for review' : `${data.needsReview} expenses need review`} />
-            <Check ok={!data.hasVehicle || data.totalKm > 0} label={data.hasVehicle ? `${data.totalKm.toFixed(0)} business km logged` : 'Vehicle not configured'} />
-            <Check ok={data.hasHomeOffice} label={data.hasHomeOffice ? 'Home office configured' : 'Home office not configured'} />
-            <Check ok={data.uninvoicedCount === 0} label={data.uninvoicedCount === 0 ? 'No uninvoiced hours' : `${data.uninvoicedCount} uninvoiced entries (${money(data.uninvoicedAmount)})`} />
-          </Panel>
-        </div>
-      )}
-
-      {tab === 'forms' && (
-        <Panel title="Forms and Amounts to Prepare">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs text-gray-500 dark:text-gray-400 border-b border-gray-100 dark:border-gray-700">
-                  <th className="py-2 pr-3">Form</th>
-                  <th className="py-2 pr-3">Line / section</th>
-                  <th className="py-2 pr-3">What to enter</th>
-                  <th className="py-2 text-right">Amount</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                {data.formRows.map((row, index) => (
-                  <tr key={`${row.form}-${row.line}-${index}`}>
-                    <td className="py-2 pr-3 font-medium text-gray-900 dark:text-white">{row.form}</td>
-                    <td className="py-2 pr-3 text-gray-600 dark:text-gray-400">{row.line}</td>
-                    <td className="py-2 pr-3 text-gray-600 dark:text-gray-400">{row.description}</td>
-                    <td className="py-2 text-right font-semibold text-gray-900 dark:text-white">{money(row.amount)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Panel>
-      )}
-
-      {tab === 'optimize' && (
-        <div className="space-y-3">
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Tax Optimization Tips</h2>
-            <p className="text-sm text-gray-500 dark:text-gray-400">Actions to maximize deductions, reduce tax risk, and keep more cash legally.</p>
-          </div>
-
-          {data.opportunities.length === 0 ? (
-            <div className="text-center py-12 bg-white dark:bg-gray-800 rounded-lg border border-gray-100 dark:border-gray-700">
-              <CheckCircle className="w-10 h-10 mx-auto mb-2 text-emerald-500" />
-              <p className="text-sm text-gray-500 dark:text-gray-400">Everything looks clean with the records currently entered.</p>
-            </div>
-          ) : data.opportunities.map(item => (
-            <div key={item.id} className="bg-white dark:bg-gray-800 rounded-lg border border-gray-100 dark:border-gray-700 p-4 flex gap-3">
-              <div className={`mt-0.5 ${item.priority === 'high' ? 'text-red-500' : item.priority === 'medium' ? 'text-amber-500' : 'text-blue-500'}`}>{item.icon}</div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-start justify-between gap-3">
-                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">{item.title}</h3>
-                  <span className="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">{item.priority}</span>
-                </div>
-                <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">{item.detail}</p>
-                <p className="text-xs font-medium text-teal-700 dark:text-teal-300 mt-2">{item.action}</p>
-                {item.estimate && <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1">Possible deduction to protect: about {money(item.estimate)}</p>}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div className="bg-amber-50 dark:bg-amber-900/10 border border-amber-200 dark:border-amber-800 rounded-lg p-4 flex gap-2">
-        <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
-        <p className="text-xs text-amber-700 dark:text-amber-400">Estimate only, based on Alberta planning assumptions and your records. Confirm with CRA software or an accountant before filing.</p>
-      </div>
-    </div>
-  );
-}
-
-function Metric({ label, value, danger = false }: { label: string; value: number; danger?: boolean }) {
-  return (
-    <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-100 dark:border-gray-700 p-3">
-      <p className="text-xs text-gray-500 dark:text-gray-400">{label}</p>
-      <p className={`text-lg font-bold mt-1 ${danger ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}`}>{money(value)}</p>
-    </div>
-  );
-}
-
-function TabButton({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: ReactElement; label: string }) {
-  return (
-    <button onClick={onClick} className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border ${active ? 'bg-teal-600 text-white border-teal-600' : 'bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-400 border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700'}`}>
-      {icon}
-      {label}
-    </button>
-  );
-}
-
-function Panel({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="bg-white dark:bg-gray-800 rounded-lg border border-gray-100 dark:border-gray-700 p-4">
-      <h2 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">{title}</h2>
-      {children}
-    </section>
-  );
-}
-
-function Row({ label, value, strong = false, danger = false }: { label: string; value: number; strong?: boolean; danger?: boolean }) {
-  return (
-    <div className="flex items-center justify-between gap-4 py-2 border-b border-gray-100 dark:border-gray-700 last:border-0">
-      <span className={`${strong ? 'font-semibold' : ''} text-sm text-gray-600 dark:text-gray-400`}>{label}</span>
-      <span className={`${strong ? 'font-bold' : 'font-medium'} ${danger ? 'text-red-600 dark:text-red-400' : 'text-gray-900 dark:text-white'}`}>{money(value)}</span>
-    </div>
-  );
-}
-
-function Check({ ok, label }: { ok: boolean; label: string }) {
-  return (
-    <div className="flex items-center gap-2 py-1.5">
-      {ok ? <CheckCircle className="w-4 h-4 text-emerald-500" /> : <AlertTriangle className="w-4 h-4 text-amber-500" />}
-      <span className={`text-sm ${ok ? 'text-gray-600 dark:text-gray-400' : 'text-amber-700 dark:text-amber-300'}`}>{label}</span>
     </div>
   );
 }

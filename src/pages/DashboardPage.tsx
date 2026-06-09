@@ -1,21 +1,11 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { DashboardCard } from '../components/DashboardCard';
 import {
-  Clock,
-  DollarSign,
-  FileText,
-  Receipt,
-  TrendingUp,
-  Calculator,
-  ShieldCheck,
-  Wallet,
-  Car,
-  Home,
-  AlertTriangle,
-  CreditCard,
+  Clock, DollarSign, FileText, Receipt,
+  TrendingUp, Calculator, ShieldCheck, Wallet, Car, Home,
+  AlertTriangle, CreditCard
 } from 'lucide-react';
 import { startOfWeek, endOfWeek, startOfMonth, endOfMonth, format } from 'date-fns';
 
@@ -36,6 +26,7 @@ interface DashboardData {
   businessKmYear: number;
   vehicleBusinessPercent: number | null;
   homeOfficeDeductible: number;
+  // New TOTAL NET fields
   totalPaymentsReceived: number;
   totalDeductibleExpenses: number;
   totalIncomeBeforeGst: number;
@@ -49,8 +40,6 @@ interface DashboardData {
 
 export function DashboardPage() {
   const { user } = useAuth();
-  const navigate = useNavigate();
-
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -60,8 +49,6 @@ export function DashboardPage() {
   }, [user]);
 
   async function loadDashboard() {
-    setLoading(true);
-
     const now = new Date();
     const weekStart = format(startOfWeek(now, { weekStartsOn: 1 }), 'yyyy-MM-dd');
     const weekEnd = format(endOfWeek(now, { weekStartsOn: 1 }), 'yyyy-MM-dd');
@@ -70,26 +57,11 @@ export function DashboardPage() {
     const yearStart = `${now.getFullYear()}-01-01`;
 
     const [
-      weekHours,
-      monthHours,
-      uninvoiced,
-      unpaidInv,
-      monthInvoices,
-      monthExpenses,
-      yearWcbPaid,
-      yearWcbAll,
-      yearGstCollected,
-      yearGstItc,
-      paymentsReceived,
-      profile,
-      mileageMonth,
-      mileageYear,
-      vehicles,
-      homeExpenses,
-      yearExpenses,
-      yearInvoices,
-      missingReceiptsRes,
-      uninvoicedCount,
+      weekHours, monthHours, uninvoiced, unpaidInv,
+      monthInvoices, monthExpenses, yearWcbPaid, yearWcbAll,
+      yearGstCollected, yearGstItc, paymentsReceived,
+      profile, mileageMonth, mileageYear, vehicles, homeExpenses,
+      yearExpenses, yearInvoices, missingReceiptsRes, uninvoicedCount,
     ] = await Promise.all([
       supabase.from('work_hours').select('total_hours').eq('user_id', user!.id).gte('work_date', weekStart).lte('work_date', weekEnd),
       supabase.from('work_hours').select('total_hours').eq('user_id', user!.id).gte('work_date', monthStart).lte('work_date', monthEnd),
@@ -147,6 +119,10 @@ export function DashboardPage() {
     const vehicleBusinessPercent = vehicles.data?.[0]?.business_use_percent || null;
     const homeOfficeDeductible = (homeExpenses.data || []).reduce((s, r) => s + (r.deductible_amount || 0), 0);
 
+    const missingReceipts = missingReceiptsRes.data?.length || 0;
+    const unpaidInvoiceCount = unpaidInv.data?.length || 0;
+    const uninvoicedHoursCount = uninvoicedCount.data?.length || 0;
+
     setData({
       hoursThisWeek,
       hoursThisMonth,
@@ -168,77 +144,38 @@ export function DashboardPage() {
       totalDeductibleExpenses,
       totalIncomeBeforeGst,
       upcomingWcbBalance,
-      missingReceipts: missingReceiptsRes.data?.length || 0,
-      unpaidInvoiceCount: unpaidInv.data?.length || 0,
-      uninvoicedHoursCount: uninvoicedCount.data?.length || 0,
+      missingReceipts,
+      unpaidInvoiceCount,
+      uninvoicedHoursCount,
       totalNet,
       profitBeforeTaxReserve,
     });
-
     setLoading(false);
   }
 
   const fmt = (n: number) => `$${n.toFixed(2)}`;
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin w-8 h-8 border-2 border-teal-600 border-t-transparent rounded-full" />
-      </div>
-    );
+    return <div className="flex items-center justify-center h-64"><div className="animate-spin w-8 h-8 border-2 border-teal-600 border-t-transparent rounded-full" /></div>;
   }
 
   if (!data) return null;
 
-  const netColor =
-    data.totalNet > 0
-      ? 'border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20'
-      : data.totalNet < 0
-      ? 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20'
-      : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800';
+  const netColor = data.totalNet > 0
+    ? 'border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-900/20'
+    : data.totalNet < 0
+    ? 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20'
+    : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800';
 
-  const netTextColor =
-    data.totalNet > 0
-      ? 'text-green-700 dark:text-green-300'
-      : data.totalNet < 0
-      ? 'text-red-700 dark:text-red-300'
-      : 'text-gray-700 dark:text-gray-300';
+  const netTextColor = data.totalNet > 0
+    ? 'text-green-700 dark:text-green-300'
+    : data.totalNet < 0
+    ? 'text-red-700 dark:text-red-300'
+    : 'text-gray-700 dark:text-gray-300';
 
   return (
     <div>
-      <div className="flex flex-col gap-4 mb-6 lg:flex-row lg:items-center lg:justify-between">
-        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
-
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-          <button
-            type="button"
-            onClick={() => navigate('/hours')}
-            className="flex items-center justify-center gap-2 px-3 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-medium rounded-lg transition-colors"
-          >
-            <Clock className="w-4 h-4" />
-            Log Hours
-          </button>
-
-          <button
-            type="button"
-            onClick={() => navigate('/vehicle')}
-            className="flex items-center justify-center gap-2 px-3 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-          >
-            <Car className="w-4 h-4" />
-            Vehicle / KM
-          </button>
-
-          <button
-            type="button"
-            onClick={() => navigate('/expenses')}
-            className="flex items-center justify-center gap-2 px-3 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 text-sm font-medium rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-          >
-            <Receipt className="w-4 h-4" />
-            Expenses
-          </button>
-        </div>
-      </div>
-
+      <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-6">Dashboard</h1>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         <DashboardCard title="Hours This Week" value={data.hoursThisWeek.toFixed(1)} icon={<Clock className="w-5 h-5" />} />
         <DashboardCard title="Hours This Month" value={data.hoursThisMonth.toFixed(1)} icon={<Clock className="w-5 h-5" />} />
@@ -257,6 +194,7 @@ export function DashboardPage() {
         <DashboardCard title="Home Office Deductible" value={fmt(data.homeOfficeDeductible)} icon={<Home className="w-5 h-5" />} subtitle="This year" />
       </div>
 
+      {/* TOTAL NET Section */}
       <div className={`mt-8 rounded-xl border-2 p-6 ${netColor}`}>
         <div className="flex items-center gap-3 mb-4">
           <div className={`p-2 rounded-lg ${data.totalNet >= 0 ? 'bg-green-100 dark:bg-green-900/40' : 'bg-red-100 dark:bg-red-900/40'}`}>
@@ -264,9 +202,7 @@ export function DashboardPage() {
           </div>
           <div>
             <h2 className="text-lg font-bold text-gray-900 dark:text-white">TOTAL NET</h2>
-            <p className="text-xs text-gray-500 dark:text-gray-400">
-              Estimated safe cash after expenses, WCB paid, GST payable, and tax reserve.
-            </p>
+            <p className="text-xs text-gray-500 dark:text-gray-400">Estimated safe cash after expenses, WCB paid, GST payable, and tax reserve.</p>
           </div>
         </div>
 
@@ -277,37 +213,30 @@ export function DashboardPage() {
             <p className="text-xs text-gray-500 dark:text-gray-400 mb-0.5">Profit Before Tax Reserve</p>
             <p className="font-bold text-gray-900 dark:text-white">{fmt(data.profitBeforeTaxReserve)}</p>
           </div>
-
           <div className="bg-white/60 dark:bg-gray-800/60 rounded-lg p-3">
             <p className="text-xs text-gray-500 dark:text-gray-400 mb-0.5">GST Payable Estimate</p>
             <p className="font-bold text-gray-900 dark:text-white">{fmt(data.estimatedGstPayable)}</p>
           </div>
-
           <div className="bg-white/60 dark:bg-gray-800/60 rounded-lg p-3">
             <p className="text-xs text-gray-500 dark:text-gray-400 mb-0.5">Tax Reserve Estimate</p>
             <p className="font-bold text-gray-900 dark:text-white">{fmt(data.suggestedTaxReserve)}</p>
           </div>
-
           <div className="bg-white/60 dark:bg-gray-800/60 rounded-lg p-3">
             <p className="text-xs text-gray-500 dark:text-gray-400 mb-0.5">WCB Paid</p>
             <p className="font-bold text-gray-900 dark:text-white">{fmt(data.wcbPaidThisYear)}</p>
           </div>
-
           <div className="bg-white/60 dark:bg-gray-800/60 rounded-lg p-3">
             <p className="text-xs text-gray-500 dark:text-gray-400 mb-0.5">Upcoming WCB Balance</p>
             <p className="font-bold text-amber-600 dark:text-amber-400">{fmt(data.upcomingWcbBalance)}</p>
           </div>
-
           <div className="bg-white/60 dark:bg-gray-800/60 rounded-lg p-3">
             <p className="text-xs text-gray-500 dark:text-gray-400 mb-0.5">Missing Receipts</p>
             <p className="font-bold text-gray-900 dark:text-white">{data.missingReceipts}</p>
           </div>
-
           <div className="bg-white/60 dark:bg-gray-800/60 rounded-lg p-3">
             <p className="text-xs text-gray-500 dark:text-gray-400 mb-0.5">Unpaid Invoices</p>
             <p className="font-bold text-gray-900 dark:text-white">{data.unpaidInvoiceCount}</p>
           </div>
-
           <div className="bg-white/60 dark:bg-gray-800/60 rounded-lg p-3">
             <p className="text-xs text-gray-500 dark:text-gray-400 mb-0.5">Uninvoiced Hours</p>
             <p className="font-bold text-gray-900 dark:text-white">{data.uninvoicedHoursCount}</p>
@@ -315,22 +244,20 @@ export function DashboardPage() {
         </div>
       </div>
 
+      {/* Helper notices */}
       <div className="mt-4 space-y-1.5">
         <p className="text-xs text-gray-400 dark:text-gray-500 italic flex items-start gap-1.5">
           <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
           TOTAL NET is an estimate for planning only.
         </p>
-
         <p className="text-xs text-gray-400 dark:text-gray-500 italic flex items-start gap-1.5">
           <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
           Expected WCB balances are not deducted from actual profit until paid.
         </p>
-
         <p className="text-xs text-gray-400 dark:text-gray-500 italic flex items-start gap-1.5">
           <AlertTriangle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
           WCB invoices may arrive later. Record the official invoice when received and update the due date.
         </p>
-
         <p className="text-xs text-gray-400 dark:text-gray-500 italic">
           GST is not income - keep it separate.
         </p>

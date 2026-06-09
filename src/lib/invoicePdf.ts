@@ -20,34 +20,6 @@ interface InvoiceForPdf {
   notes: string | null;
 }
 
-const DEFAULT_GST_RATE = 0.05;
-
-function getGstRateDecimal(rate: number | null | undefined): number {
-  if (rate === null || rate === undefined || Number.isNaN(Number(rate))) {
-    return DEFAULT_GST_RATE;
-  }
-
-  const numericRate = Number(rate);
-
-  if (!Number.isFinite(numericRate) || numericRate < 0) {
-    return DEFAULT_GST_RATE;
-  }
-
-  // If the database has 5, convert it to 0.05.
-  // If the database already has 0.05, keep it as 0.05.
-  return numericRate > 1 ? numericRate / 100 : numericRate;
-}
-
-function getGstRatePercentLabel(rate: number | null | undefined): string {
-  const percent = getGstRateDecimal(rate) * 100;
-
-  if (Number.isInteger(percent)) {
-    return percent.toFixed(0);
-  }
-
-  return percent.toFixed(2).replace(/\.?0+$/, '');
-}
-
 export function generateInvoicePdf(
   invoice: InvoiceForPdf,
   items: InvoiceLineItem[],
@@ -56,29 +28,17 @@ export function generateInvoicePdf(
 ) {
   const formatDate = (d: string) => {
     const date = new Date(d + 'T00:00');
-    return date.toLocaleDateString('en-CA', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric',
-    });
+    return date.toLocaleDateString('en-CA', { year: 'numeric', month: 'long', day: 'numeric' });
   };
 
   const formatItemDate = (d: string) => {
     const date = new Date(d + 'T00:00');
-    return date.toLocaleDateString('en-CA', {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-    });
+    return date.toLocaleDateString('en-CA', { weekday: 'short', month: 'short', day: 'numeric' });
   };
 
   const formatCurrency = (n: number) => `$${n.toFixed(2)}`;
 
-  const gstRateLabel = getGstRatePercentLabel(profile.gst_rate);
-
-  const itemRows = items
-    .map(
-      (item, i) => `
+  const itemRows = items.map((item, i) => `
     <tr style="background: ${i % 2 === 0 ? '#ffffff' : '#f9fafb'};">
       <td style="padding: 11px 14px; border-bottom: 1px solid #f3f4f6; font-size: 12px; color: #9ca3af; white-space: nowrap;">
         ${item.work_date ? formatItemDate(item.work_date) : '-'}
@@ -96,9 +56,7 @@ export function generateInvoicePdf(
         ${formatCurrency(item.subtotal || 0)}
       </td>
     </tr>
-  `
-    )
-    .join('');
+  `).join('');
 
   const html = `
 <!DOCTYPE html>
@@ -139,7 +97,6 @@ export function generateInvoicePdf(
           <h1 style="font-size: 36px; font-weight: 800; color: #0d9488; letter-spacing: -1px; line-height: 1;">INVOICE</h1>
           <p style="font-size: 13px; color: #9ca3af; margin-top: 6px; letter-spacing: 0.3px;">${invoice.invoice_number}</p>
         </div>
-
         <div style="text-align: right;">
           <p style="font-size: 17px; font-weight: 700; color: #111827;">${profile.business_name || profile.full_name}</p>
           ${profile.full_name && profile.business_name ? `<p style="font-size: 13px; color: #6b7280; margin-top: 2px;">${profile.full_name}</p>` : ''}
@@ -163,23 +120,17 @@ export function generateInvoicePdf(
           ${client.email ? `<p style="font-size: 13px; color: #6b7280;">${client.email}</p>` : ''}
           ${client.phone ? `<p style="font-size: 13px; color: #6b7280;">${client.phone}</p>` : ''}
         </div>
-
         <div style="display: flex; gap: 32px; text-align: right;">
           <div>
             <p style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #9ca3af; margin-bottom: 4px;">Invoice Date</p>
             <p style="font-size: 14px; color: #111827; font-weight: 500;">${formatDate(invoice.invoice_date)}</p>
           </div>
-
-          ${
-            invoice.due_date
-              ? `
+          ${invoice.due_date ? `
           <div>
             <p style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #9ca3af; margin-bottom: 4px;">Due Date</p>
             <p style="font-size: 14px; color: #111827; font-weight: 500;">${formatDate(invoice.due_date)}</p>
           </div>
-          `
-              : ''
-          }
+          ` : ''}
         </div>
       </div>
 
@@ -194,7 +145,6 @@ export function generateInvoicePdf(
             <th style="padding: 11px 14px; text-align: right; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #9ca3af;">Amount</th>
           </tr>
         </thead>
-
         <tbody>
           ${itemRows}
         </tbody>
@@ -207,18 +157,12 @@ export function generateInvoicePdf(
             <span style="color: #6b7280;">Subtotal</span>
             <span style="color: #374151; font-weight: 500;">${formatCurrency(invoice.subtotal)}</span>
           </div>
-
-          ${
-            invoice.gst_amount > 0
-              ? `
+          ${invoice.gst_amount > 0 ? `
           <div style="display: flex; justify-content: space-between; padding: 8px 0; font-size: 13px; border-bottom: 1px solid #f3f4f6;">
-            <span style="color: #6b7280;">GST (${gstRateLabel}%)</span>
+            <span style="color: #6b7280;">GST (${profile.gst_rate || 5}%)</span>
             <span style="color: #374151; font-weight: 500;">${formatCurrency(invoice.gst_amount)}</span>
           </div>
-          `
-              : ''
-          }
-
+          ` : ''}
           <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; padding: 14px 16px; background: #0d9488; border-radius: 8px;">
             <span style="font-size: 14px; font-weight: 700; color: #ffffff;">Total Due</span>
             <span style="font-size: 20px; font-weight: 800; color: #ffffff;">${formatCurrency(invoice.total_amount)}</span>
@@ -227,35 +171,22 @@ export function generateInvoicePdf(
       </div>
 
       <!-- Notes / Payment Instructions -->
-      ${
-        invoice.notes || profile.payment_instructions
-          ? `
+      ${invoice.notes || profile.payment_instructions ? `
       <div style="border-top: 1px solid #e5e7eb; padding-top: 20px; display: flex; gap: 40px; margin-bottom: 24px;">
-        ${
-          invoice.notes
-            ? `
+        ${invoice.notes ? `
         <div style="flex: 1;">
           <p style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #9ca3af; margin-bottom: 6px;">Notes</p>
           <p style="font-size: 13px; color: #4b5563; line-height: 1.6;">${invoice.notes}</p>
         </div>
-        `
-            : ''
-        }
-
-        ${
-          profile.payment_instructions
-            ? `
+        ` : ''}
+        ${profile.payment_instructions ? `
         <div style="flex: 1;">
           <p style="font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #9ca3af; margin-bottom: 6px;">Payment Instructions</p>
           <p style="font-size: 13px; color: #4b5563; white-space: pre-line; line-height: 1.6;">${profile.payment_instructions}</p>
         </div>
-        `
-            : ''
-        }
+        ` : ''}
       </div>
-      `
-          : ''
-      }
+      ` : ''}
 
       <!-- Footer -->
       <div style="border-top: 1px solid #f3f4f6; padding-top: 16px; display: flex; justify-content: space-between; align-items: center;">
@@ -286,26 +217,25 @@ export function generateInvoicePdf(
   iframeDoc.close();
 
   const triggerPrint = () => {
-    const clientName = client.name.replace(/[^a-zA-Z0-9 ]/g, '').trim();
-    const date = formatDate(invoice.invoice_date);
-    const title = `Felipe Invoice - ${clientName} - ${date}`;
-    const originalTitle = document.title;
+  const clientName = client.name.replace(/[^a-zA-Z0-9 ]/g, '').trim();
+  const date = formatDate(invoice.invoice_date);
+  const title = `Felipe Invoice - ${clientName} - ${date}`;
+  const originalTitle = document.title;
 
-    document.title = title;
+  // Cambia el título ANTES del timeout, no dentro
+  document.title = title;
 
+  setTimeout(() => {
+    const win = iframe.contentWindow;
+    if (!win) return;
+    win.document.title = title;
+    win.print();
     setTimeout(() => {
-      const win = iframe.contentWindow;
-      if (!win) return;
-
-      win.document.title = title;
-      win.print();
-
-      setTimeout(() => {
-        document.title = originalTitle;
-        document.body.removeChild(iframe);
-      }, 2000);
-    }, 500);
-  };
+      document.title = originalTitle;
+      document.body.removeChild(iframe);
+    }, 2000);
+  }, 500);
+};
 
   iframe.onload = triggerPrint;
 
