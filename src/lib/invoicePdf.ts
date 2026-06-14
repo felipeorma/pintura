@@ -159,7 +159,7 @@ export function generateInvoicePdf(
           </div>
           ${invoice.gst_amount > 0 ? `
           <div style="display: flex; justify-content: space-between; padding: 8px 0; font-size: 13px; border-bottom: 1px solid #f3f4f6;">
-            <span style="color: #6b7280;">GST (${profile.gst_rate || 5}%)</span>
+            <span style="color: #6b7280;">GST (${((profile.gst_rate || 0.05) * 100).toFixed(0)}%)</span>
             <span style="color: #374151; font-weight: 500;">${formatCurrency(invoice.gst_amount)}</span>
           </div>
           ` : ''}

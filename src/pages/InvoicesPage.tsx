@@ -163,7 +163,7 @@ export function InvoicesPage() {
     const validItems = serviceItems.filter(i => i.description && i.rate > 0);
     if (validItems.length === 0 || !selectedClient) return;
 
-    const gstRate = profile?.gst_enabled ? (profile.gst_rate || 5) / 100 : 0;
+    const gstRate = profile?.gst_enabled ? (profile.gst_rate || 0.05) : 0;
     const subtotal = validItems.reduce((s, i) => s + (i.quantity * i.rate), 0);
     const gstAmount = subtotal * gstRate;
     const totalAmount = subtotal + gstAmount;
@@ -250,7 +250,7 @@ export function InvoicesPage() {
     const validItems = editItems.filter(i => i.description && i.rate > 0);
     if (validItems.length === 0) return;
 
-    const gstRate = profile?.gst_enabled ? (profile.gst_rate || 5) / 100 : 0;
+    const gstRate = profile?.gst_enabled ? (profile.gst_rate || 0.05) : 0;
     const subtotal = validItems.reduce((s, i) => s + (i.quantity * i.rate), 0);
     const gstAmount = subtotal * gstRate;
     const totalAmount = subtotal + gstAmount;
@@ -356,7 +356,7 @@ export function InvoicesPage() {
   const filtered = filterStatus === 'all' ? invoices : invoices.filter(i => i.status === filterStatus);
 
   const serviceSubtotal = serviceItems.reduce((s, i) => s + (i.quantity * i.rate), 0);
-  const serviceGst = profile?.gst_enabled ? serviceSubtotal * ((profile.gst_rate || 5) / 100) : 0;
+  const serviceGst = profile?.gst_enabled ? serviceSubtotal * (profile.gst_rate || 0.05) : 0;
 
   const editSubtotal = editItems.reduce((s, i) => s + (i.quantity * i.rate), 0);
   const editGst = profile?.gst_enabled ? editSubtotal * ((profile.gst_rate || 5) / 100) : 0;
@@ -440,7 +440,7 @@ export function InvoicesPage() {
                           </div>
                           {profile?.gst_enabled && (
                             <div className="flex justify-between text-sm">
-                              <span className="text-gray-600 dark:text-gray-400">GST ({profile.gst_rate || 5}%):</span>
+                              <span className="text-gray-600 dark:text-gray-400">GST ({((profile.gst_rate || 0.05) * 100).toFixed(0)}%):</span>
                               <span className="font-medium text-gray-900 dark:text-white">${uninvoicedHours.filter(h => selectedHours.has(h.id)).reduce((s, h) => s + (h.gst_amount || 0), 0).toFixed(2)}</span>
                             </div>
                           )}
@@ -501,7 +501,7 @@ export function InvoicesPage() {
                       </div>
                       {profile?.gst_enabled && (
                         <div className="flex justify-between text-sm">
-                          <span className="text-gray-600 dark:text-gray-400">GST ({profile.gst_rate || 5}%):</span>
+                          <span className="text-gray-600 dark:text-gray-400">GST ({((profile.gst_rate || 0.05) * 100).toFixed(0)}%):</span>
                           <span className="font-medium text-gray-900 dark:text-white">${serviceGst.toFixed(2)}</span>
                         </div>
                       )}
@@ -584,7 +584,7 @@ export function InvoicesPage() {
                   </div>
                   {profile?.gst_enabled && (
                     <div className="flex justify-between text-sm">
-                      <span className="text-gray-600 dark:text-gray-400">GST ({profile.gst_rate || 5}%):</span>
+                      <span className="text-gray-600 dark:text-gray-400">GST ({((profile.gst_rate || 0.05) * 100).toFixed(0)}%):</span>
                       <span className="font-medium text-gray-900 dark:text-white">${editGst.toFixed(2)}</span>
                     </div>
                   )}
