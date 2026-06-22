@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { StatusBadge } from '../components/StatusBadge';
 import type { WorkHour, Client, JobSite, Profile } from '../lib/types';
-import { Plus, X, Clock } from 'lucide-react';
+import { Plus, X, Clock, Trash2 } from 'lucide-react';
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth } from 'date-fns';
 
 type DateView = 'week' | 'month' | 'custom';
@@ -44,6 +44,7 @@ export function WorkHoursPage() {
   const [view, setView] = useState<DateView>('week');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<WorkHourWithRelations | null>(null);
 
   const [dateFrom, setDateFrom] = useState(
     format(startOfWeek(new Date(), { weekStartsOn: 1 }), 'yyyy-MM-dd')
@@ -259,6 +260,14 @@ export function WorkHoursPage() {
       hourly_rate: profile?.default_hourly_rate || 0,
       notes: '',
     });
+  }
+
+  async function deleteEntry(entry: WorkHourWithRelations) {
+    await supabase.from('work_hours').delete().eq('id', entry.id);
+    setDeleteConfirm(null);
+    setShowForm(false);
+    setEditingId(null);
+    loadData();
   }
 
   function editEntry(entry: WorkHour) {
@@ -630,13 +639,52 @@ export function WorkHoursPage() {
                 />
               </div>
 
-              <button
-                type="submit"
-                className="w-full py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-medium rounded-lg transition-colors"
-              >
-                {editingId ? 'Update' : 'Save Entry'}
-              </button>
+              <div className="flex gap-3">
+                {editingId && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const entry = entries.find(e => e.id === editingId);
+                      if (entry) setDeleteConfirm(entry);
+                    }}
+                    className="flex items-center justify-center gap-1.5 px-4 py-2.5 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 font-medium rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
+                <button
+                  type="submit"
+                  className="flex-1 py-2.5 bg-teal-600 hover:bg-teal-700 text-white font-medium rounded-lg transition-colors"
+                >
+                  {editingId ? 'Update' : 'Save Entry'}
+                </button>
+              </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {deleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+          <div className="bg-white dark:bg-gray-800 rounded-xl w-full max-w-sm shadow-xl p-6">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Delete Entry?</h3>
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+              {format(new Date(deleteConfirm.work_date + 'T00:00'), 'EEE, MMM d')} — {deleteConfirm.total_hours?.toFixed(1)}h @ ${deleteConfirm.hourly_rate}/hr
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setDeleteConfirm(null)}
+                className="flex-1 py-2.5 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 font-medium rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => deleteEntry(deleteConfirm)}
+                className="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white font-medium rounded-lg transition-colors"
+              >
+                Delete
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -651,11 +699,10 @@ export function WorkHoursPage() {
           filtered.map(entry => (
             <div
               key={entry.id}
-              onClick={() => editEntry(entry)}
-              className="bg-white dark:bg-gray-800 rounded-lg border border-gray-100 dark:border-gray-700 p-3 cursor-pointer hover:border-teal-300 dark:hover:border-teal-700 transition-colors"
+              className="bg-white dark:bg-gray-800 rounded-lg border border-gray-100 dark:border-gray-700 p-3"
             >
               <div className="flex items-center justify-between">
-                <div className="flex-1 min-w-0">
+                <div className="flex-1 min-w-0 cursor-pointer" onClick={() => editEntry(entry)}>
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-sm font-medium text-gray-900 dark:text-white">
                       {format(new Date(entry.work_date + 'T00:00'), 'EEE, MMM d')}
@@ -682,14 +729,21 @@ export function WorkHoursPage() {
                   </p>
                 </div>
 
-                <div className="text-right">
-                  <p className="text-sm font-semibold text-gray-900 dark:text-white">
-                    {entry.total_hours?.toFixed(1)}h
-                  </p>
-
-                  <p className="text-xs text-gray-500 dark:text-gray-400">
-                    ${entry.subtotal?.toFixed(2)}
-                  </p>
+                <div className="flex items-center gap-2 ml-3">
+                  <div className="text-right">
+                    <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                      {entry.total_hours?.toFixed(1)}h
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      ${entry.subtotal?.toFixed(2)}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setDeleteConfirm(entry)}
+                    className="p-1.5 text-gray-400 hover:text-red-500 transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 </div>
               </div>
             </div>
